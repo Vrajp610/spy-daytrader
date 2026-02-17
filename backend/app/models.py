@@ -1,0 +1,93 @@
+"""SQLAlchemy ORM models."""
+
+from datetime import datetime
+from sqlalchemy import (
+    Column, Integer, Float, String, DateTime, Boolean, Text, Date, JSON,
+)
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Trade(Base):
+    __tablename__ = "trades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, default="SPY", nullable=False)
+    direction = Column(String, nullable=False)  # LONG / SHORT
+    strategy = Column(String, nullable=False)
+    regime = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    entry_time = Column(DateTime, nullable=False)
+    exit_price = Column(Float, nullable=True)
+    exit_time = Column(DateTime, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    take_profit = Column(Float, nullable=True)
+    pnl = Column(Float, nullable=True)
+    pnl_pct = Column(Float, nullable=True)
+    exit_reason = Column(String, nullable=True)
+    is_paper = Column(Boolean, default=True, nullable=False)
+    status = Column(String, default="OPEN", nullable=False)  # OPEN / CLOSED
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DailyPerformance(Base):
+    __tablename__ = "daily_performance"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, unique=True, nullable=False)
+    starting_capital = Column(Float, nullable=False)
+    ending_capital = Column(Float, nullable=False)
+    realized_pnl = Column(Float, default=0.0)
+    trade_count = Column(Integer, default=0)
+    win_count = Column(Integer, default=0)
+    loss_count = Column(Integer, default=0)
+    regime = Column(String, nullable=True)
+
+
+class AccountSnapshot(Base):
+    __tablename__ = "account_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    equity = Column(Float, nullable=False)
+    cash = Column(Float, nullable=False)
+    buying_power = Column(Float, nullable=False)
+    peak_equity = Column(Float, nullable=False)
+    drawdown_pct = Column(Float, default=0.0)
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    symbol = Column(String, default="SPY")
+    start_date = Column(String, nullable=False)
+    end_date = Column(String, nullable=False)
+    interval = Column(String, default="1m")
+    initial_capital = Column(Float, default=25000.0)
+    strategies = Column(String, nullable=False)  # comma-separated
+    total_return_pct = Column(Float, nullable=True)
+    win_rate = Column(Float, nullable=True)
+    total_trades = Column(Integer, nullable=True)
+    sharpe_ratio = Column(Float, nullable=True)
+    max_drawdown_pct = Column(Float, nullable=True)
+    profit_factor = Column(Float, nullable=True)
+    avg_win = Column(Float, nullable=True)
+    avg_loss = Column(Float, nullable=True)
+    equity_curve = Column(JSON, nullable=True)
+    trades_json = Column(JSON, nullable=True)
+
+
+class StrategyConfig(Base):
+    __tablename__ = "strategy_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False)
+    enabled = Column(Boolean, default=True)
+    params = Column(JSON, default=dict)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
