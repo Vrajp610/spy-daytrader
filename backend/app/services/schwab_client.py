@@ -32,6 +32,12 @@ class SchwabClient:
 
         try:
             import schwab
+        except ImportError:
+            logger.warning("schwab-py not installed - running in paper-only mode")
+            return
+
+        try:
+            import schwab
             token_path = Path(settings.schwab_token_path)
             if token_path.exists():
                 self._client = schwab.auth.client_from_token_file(

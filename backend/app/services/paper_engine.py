@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 import logging
 import random
 
 logger = logging.getLogger(__name__)
+
+ET = ZoneInfo("America/New_York")
 
 
 class PaperPosition:
@@ -79,7 +82,7 @@ class PaperEngine:
             direction=direction,
             quantity=quantity,
             entry_price=fill_price,
-            entry_time=datetime.now(),
+            entry_time=datetime.now(ET),
             stop_loss=stop_loss,
             take_profit=take_profit,
             strategy=strategy,
@@ -111,7 +114,7 @@ class PaperEngine:
             "entry_price": self.position.entry_price,
             "exit_price": fill_price,
             "entry_time": self.position.entry_time.isoformat(),
-            "exit_time": datetime.now().isoformat(),
+            "exit_time": datetime.now(ET).isoformat(),
             "pnl": round(pnl, 2),
             "pnl_pct": round(pnl / (self.position.entry_price * self.position.quantity) * 100, 2),
             "exit_reason": reason,
@@ -139,7 +142,7 @@ class PaperEngine:
 
     @property
     def daily_pnl(self) -> float:
-        today = datetime.now().date()
+        today = datetime.now(ET).date()
         return sum(
             t["pnl"] for t in self.closed_trades
             if datetime.fromisoformat(t["exit_time"]).date() == today
@@ -147,7 +150,7 @@ class PaperEngine:
 
     @property
     def trades_today(self) -> int:
-        today = datetime.now().date()
+        today = datetime.now(ET).date()
         return sum(
             1 for t in self.closed_trades
             if datetime.fromisoformat(t["exit_time"]).date() == today

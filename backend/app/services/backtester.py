@@ -13,6 +13,8 @@ from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
 from app.services.strategies.orb import ORBStrategy
 from app.services.strategies.ema_crossover import EMACrossoverStrategy
+from app.services.strategies.volume_flow import VolumeFlowStrategy
+from app.services.strategies.mtf_momentum import MTFMomentumStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +22,16 @@ STRATEGY_MAP = {
     "vwap_reversion": VWAPReversionStrategy,
     "orb": ORBStrategy,
     "ema_crossover": EMACrossoverStrategy,
+    "volume_flow": VolumeFlowStrategy,
+    "mtf_momentum": MTFMomentumStrategy,
 }
 
 # Regime -> preferred strategies
 REGIME_STRATEGY_MAP = {
-    MarketRegime.TRENDING_UP: ["orb", "ema_crossover"],
-    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover"],
-    MarketRegime.RANGE_BOUND: ["vwap_reversion"],
-    MarketRegime.VOLATILE: ["vwap_reversion"],  # tight stops
+    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum"],
+    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum"],
+    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow"],
+    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow"],
 }
 
 
@@ -171,12 +175,13 @@ class Backtester:
 
         df = dm.add_indicators(df)
 
-        # Also prepare 5-min bars for regime detection + EMA crossover
+        # Also prepare 5-min and 15-min bars for regime detection + strategies
         df_5min = dm.resample_to_5min(df)
+        df_15min = dm.resample_to_interval(df, "15min")
 
-        return self._simulate(df, df_5min)
+        return self._simulate(df, df_5min, df_15min)
 
-    def _simulate(self, df: pd.DataFrame, df_5min: pd.DataFrame) -> BacktestResult:
+    def _simulate(self, df: pd.DataFrame, df_5min: pd.DataFrame, df_15min: pd.DataFrame) -> BacktestResult:
         result = BacktestResult()
         result.initial_capital = self.initial_capital
         capital = self.initial_capital
@@ -290,12 +295,24 @@ class Backtester:
 
                 for strat_name in allowed_strategies:
                     strategy = self.strategy_instances[strat_name]
-                    # Use 5-min bars for EMA crossover, 1-min for others
+                    # Use 5-min bars for EMA crossover, multi-TF for mtf_momentum, 1-min for others
                     if strat_name == "ema_crossover" and len(df_5min) > 30:
                         five_idx = df_5min.index.searchsorted(bar_time) - 1
                         if five_idx < 30 or five_idx >= len(df_5min):
                             continue
                         signal = strategy.generate_signal(df_5min, five_idx, bar_time)
+                    elif strat_name == "mtf_momentum":
+                        five_idx = df_5min.index.searchsorted(bar_time) - 1
+                        fifteen_idx = df_15min.index.searchsorted(bar_time) - 1
+                        if five_idx < 20 or fifteen_idx < 10:
+                            continue
+                        if five_idx >= len(df_5min) or fifteen_idx >= len(df_15min):
+                            continue
+                        signal = strategy.generate_signal(
+                            df, idx, bar_time,
+                            df_5min=df_5min.iloc[:five_idx + 1],
+                            df_15min=df_15min.iloc[:fifteen_idx + 1],
+                        )
                     else:
                         signal = strategy.generate_signal(df, idx, bar_time)
 

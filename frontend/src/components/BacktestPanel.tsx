@@ -7,7 +7,7 @@ export default function BacktestPanel() {
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [strategies, setStrategies] = useState(['vwap_reversion', 'orb', 'ema_crossover']);
+  const [strategies, setStrategies] = useState(['vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum']);
   const [useRegime, setUseRegime] = useState(true);
   const [capital, setCapital] = useState(25000);
 
@@ -37,7 +37,7 @@ export default function BacktestPanel() {
     );
   };
 
-  const allStrategies = ['vwap_reversion', 'orb', 'ema_crossover'];
+  const allStrategies = ['vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum'];
 
   return (
     <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">

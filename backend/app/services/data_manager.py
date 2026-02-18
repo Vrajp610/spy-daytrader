@@ -3,24 +3,79 @@
 from __future__ import annotations
 import ssl
 import certifi
+import json
+import urllib.request
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 import logging
 
 # Fix SSL certificate verification on macOS
-ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
+_ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 logger = logging.getLogger(__name__)
 
 FALLBACK_CSV = Path(__file__).resolve().parent.parent.parent / "spy_sample.csv"
 
+# Period string to seconds mapping for the Yahoo v8 API
+_PERIOD_SECONDS = {
+    "1d": 86400, "2d": 172800, "5d": 432000, "1mo": 2592000,
+    "3mo": 7776000, "6mo": 15552000, "1y": 31536000,
+}
+
 
 class DataManager:
     """Fetches SPY data and computes technical indicators."""
+
+    @staticmethod
+    def _fetch_yahoo_chart(
+        symbol: str,
+        period: str = "5d",
+        interval: str = "1m",
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Fetch data directly from Yahoo Finance v8 chart API."""
+        base = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+
+        if start and end:
+            # Convert date strings to unix timestamps
+            start_ts = int(datetime.strptime(start, "%Y-%m-%d").timestamp())
+            end_ts = int(datetime.strptime(end, "%Y-%m-%d").timestamp()) + 86400
+            params = f"period1={start_ts}&period2={end_ts}&interval={interval}"
+        else:
+            params = f"range={period}&interval={interval}"
+
+        url = f"{base}?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+
+        resp = urllib.request.urlopen(req, context=_ssl_context, timeout=15)
+        data = json.loads(resp.read())
+
+        result = data.get("chart", {}).get("result")
+        if not result:
+            return pd.DataFrame()
+
+        chart = result[0]
+        timestamps = chart.get("timestamp", [])
+        quote = chart.get("indicators", {}).get("quote", [{}])[0]
+
+        if not timestamps:
+            return pd.DataFrame()
+
+        df = pd.DataFrame({
+            "open": quote.get("open", []),
+            "high": quote.get("high", []),
+            "low": quote.get("low", []),
+            "close": quote.get("close", []),
+            "volume": quote.get("volume", []),
+        }, index=pd.to_datetime(timestamps, unit="s", utc=True))
+
+        df.index.name = "Datetime"
+        df = df.dropna(subset=["close"])
+        return df
 
     @staticmethod
     def fetch_intraday(
@@ -30,16 +85,16 @@ class DataManager:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
+        # Primary: direct Yahoo Finance API
+        df = pd.DataFrame()
         try:
-            ticker = yf.Ticker(symbol)
-            if start and end:
-                df = ticker.history(start=start, end=end, interval=interval)
-            else:
-                df = ticker.history(period=period, interval=interval)
+            df = DataManager._fetch_yahoo_chart(symbol, period, interval, start, end)
+            if not df.empty:
+                logger.info(f"Fetched {len(df)} bars from Yahoo Finance API")
         except Exception as e:
-            logger.warning(f"yfinance fetch failed: {e}")
-            df = pd.DataFrame()
+            logger.warning(f"Yahoo Finance API fetch failed: {e}")
 
+        # Fallback: CSV
         if df.empty and FALLBACK_CSV.exists():
             logger.info(f"Using fallback CSV: {FALLBACK_CSV}")
             df = pd.read_csv(FALLBACK_CSV, index_col=0, parse_dates=True)
@@ -156,7 +211,12 @@ class DataManager:
     @staticmethod
     def resample_to_5min(df: pd.DataFrame) -> pd.DataFrame:
         """Resample 1-min bars to 5-min bars."""
-        resampled = df.resample("5min").agg({
+        return DataManager.resample_to_interval(df, "5min")
+
+    @staticmethod
+    def resample_to_interval(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+        """Resample 1-min bars to the given interval (e.g. '5min', '15min')."""
+        resampled = df.resample(interval).agg({
             "open": "first",
             "high": "max",
             "low": "min",

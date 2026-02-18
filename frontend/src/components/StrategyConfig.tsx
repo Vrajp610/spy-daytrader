@@ -31,6 +31,8 @@ export default function StrategyConfigPanel() {
     vwap_reversion: 'VWAP Mean Reversion',
     orb: 'Opening Range Breakout',
     ema_crossover: 'EMA Crossover + RSI',
+    volume_flow: 'Volume Profile + Order Flow',
+    mtf_momentum: 'Multi-TF Momentum',
   };
 
   return (

@@ -34,11 +34,14 @@ class BotStatus(BaseModel):
     running: bool
     mode: str  # paper / live
     current_regime: Optional[str] = None
-    open_position: Optional[TradeOut] = None
+    open_position: Optional[dict] = None
     daily_pnl: float = 0.0
     daily_trades: int = 0
     consecutive_losses: int = 0
     cooldown_until: Optional[datetime] = None
+    equity: Optional[float] = None
+    peak_equity: Optional[float] = None
+    drawdown_pct: Optional[float] = None
 
 
 class TradingModeUpdate(BaseModel):

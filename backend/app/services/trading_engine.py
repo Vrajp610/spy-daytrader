@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 import pandas as pd
@@ -18,15 +19,19 @@ from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
 from app.services.strategies.orb import ORBStrategy
 from app.services.strategies.ema_crossover import EMACrossoverStrategy
+from app.services.strategies.volume_flow import VolumeFlowStrategy
+from app.services.strategies.mtf_momentum import MTFMomentumStrategy
 from app.websocket import ws_manager
 
 logger = logging.getLogger(__name__)
 
+ET = ZoneInfo("America/New_York")
+
 REGIME_STRATEGY_MAP = {
-    MarketRegime.TRENDING_UP: ["orb", "ema_crossover"],
-    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover"],
-    MarketRegime.RANGE_BOUND: ["vwap_reversion"],
-    MarketRegime.VOLATILE: ["vwap_reversion"],
+    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum"],
+    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum"],
+    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow"],
+    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow"],
 }
 
 
@@ -46,6 +51,8 @@ class TradingEngine:
             "vwap_reversion": VWAPReversionStrategy(),
             "orb": ORBStrategy(),
             "ema_crossover": EMACrossoverStrategy(),
+            "volume_flow": VolumeFlowStrategy(),
+            "mtf_momentum": MTFMomentumStrategy(),
         }
         self.enabled_strategies: set[str] = set(self.strategies.keys())
 
@@ -53,6 +60,7 @@ class TradingEngine:
         self._last_data_fetch: Optional[datetime] = None
         self._df_1min: Optional[pd.DataFrame] = None
         self._df_5min: Optional[pd.DataFrame] = None
+        self._df_15min: Optional[pd.DataFrame] = None
 
     async def start(self):
         if self.running:
@@ -91,7 +99,7 @@ class TradingEngine:
         """Main trading loop - runs every 30 seconds during market hours."""
         while self.running:
             try:
-                now = datetime.now()
+                now = datetime.now(ET)
                 t = now.time()
 
                 # Only trade during market hours (9:30 AM - 4:00 PM ET)
@@ -107,6 +115,10 @@ class TradingEngine:
                 if self._df_1min is None or self._df_1min.empty:
                     await asyncio.sleep(30)
                     continue
+
+                # Also compute 15-min bars for MTF strategy
+                if self._df_1min is not None and not self._df_1min.empty:
+                    self._df_15min = self.data_manager.resample_to_interval(self._df_1min, "15min")
 
                 # Detect regime
                 if self._df_5min is not None and len(self._df_5min) > 20:
@@ -147,7 +159,7 @@ class TradingEngine:
             if not self._df_1min.empty:
                 self._df_1min = self.data_manager.add_indicators(self._df_1min)
                 self._df_5min = self.data_manager.resample_to_5min(self._df_1min)
-            self._last_data_fetch = datetime.now()
+            self._last_data_fetch = datetime.now(ET)
         except Exception as e:
             logger.error(f"Data fetch error: {e}")
 
@@ -169,7 +181,7 @@ class TradingEngine:
             if s in REGIME_STRATEGY_MAP.get(self.current_regime, [])
         ]
 
-        now = datetime.now()
+        now = datetime.now(ET)
         for strat_name in allowed:
             strategy = self.strategies.get(strat_name)
             if not strategy:
@@ -178,6 +190,18 @@ class TradingEngine:
             if strat_name == "ema_crossover" and self._df_5min is not None and len(self._df_5min) > 30:
                 idx = len(self._df_5min) - 1
                 signal = strategy.generate_signal(self._df_5min, idx, now)
+            elif strat_name == "mtf_momentum":
+                # MTF strategy needs all three timeframes
+                if (self._df_1min is not None and len(self._df_1min) > 30
+                        and self._df_5min is not None and len(self._df_5min) > 20
+                        and self._df_15min is not None and len(self._df_15min) > 10):
+                    idx = len(self._df_1min) - 1
+                    signal = strategy.generate_signal(
+                        self._df_1min, idx, now,
+                        df_5min=self._df_5min, df_15min=self._df_15min,
+                    )
+                else:
+                    continue
             elif self._df_1min is not None and len(self._df_1min) > 30:
                 idx = len(self._df_1min) - 1
                 signal = strategy.generate_signal(self._df_1min, idx, now)
@@ -243,7 +267,7 @@ class TradingEngine:
         if not pos:
             return
 
-        now = datetime.now()
+        now = datetime.now(ET)
 
         # EOD exit at 3:55 PM
         if now.time() >= time(15, 55):
