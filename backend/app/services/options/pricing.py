@@ -127,13 +127,32 @@ def estimate_premium_change(
     return delta_val * dS + 0.5 * gamma_val * dS * dS + theta_val * dt_days
 
 
-def iv_from_atr(atr: float, price: float) -> float:
+def iv_from_atr(atr: float, price: float, bar_minutes: int = 1) -> float:
     """Estimate annualized IV from ATR.
 
+    Args:
+        atr: Average True Range value
+        price: Current underlying price
+        bar_minutes: Timeframe of the ATR in minutes (1 for 1-min bars, 1440 for daily)
+
     Uses the relationship: daily_vol ≈ ATR / (price * 1.4)
+    For intraday ATR, first scales to daily using sqrt(minutes_per_day / bar_minutes).
     Then annualizes: IV = daily_vol * sqrt(252)
     """
     if price <= 0 or atr <= 0:
         return 0.20  # default 20%
-    daily_vol = atr / (price * 1.4)
-    return daily_vol * math.sqrt(252)
+
+    # Scale intraday ATR to daily ATR
+    # A trading day has 390 minutes (6.5 hours)
+    import math as _math
+    if bar_minutes < 1440:
+        bars_per_day = 390 / max(1, bar_minutes)
+        daily_atr = atr * _math.sqrt(bars_per_day)
+    else:
+        daily_atr = atr
+
+    daily_vol = daily_atr / (price * 1.4)
+    iv = daily_vol * math.sqrt(252)
+
+    # Clamp to reasonable range: 8% - 120%
+    return max(0.08, min(iv, 1.20))

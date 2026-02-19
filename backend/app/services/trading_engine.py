@@ -243,7 +243,7 @@ class TradingEngine:
                     atr = float(atr_val)
 
             self._current_chain = await self.chain_provider.get_chain(
-                "SPY", underlying_price=price, atr=atr,
+                "SPY", underlying_price=price, atr=atr, bar_minutes=1,
             )
             self._last_chain_fetch = datetime.now(ET)
 
@@ -402,6 +402,25 @@ class TradingEngine:
         order.max_profit = (order.max_profit / max(1, order.contracts)) * contracts
         order.regime = self.current_regime.value
 
+        # Reject trades where commission would exceed max profit
+        total_legs = sum(leg.quantity for leg in order.legs)
+        estimated_commission = total_legs * settings.options_commission_per_contract * 2
+        total_premium = abs(order.net_premium) * contracts * 100
+        if estimated_commission >= total_premium * 0.5:
+            logger.warning(
+                f"Rejecting {strat_name}: commission ${estimated_commission:.2f} "
+                f">= 50% of premium ${total_premium:.2f}"
+            )
+            return
+
+        # Reject credit spreads with unreasonably low premium (<$0.10 per contract)
+        if order.is_credit and abs(order.net_premium) < 0.10:
+            logger.warning(
+                f"Rejecting {strat_name}: credit premium ${abs(order.net_premium):.4f} "
+                f"too low (min $0.10)"
+            )
+            return
+
         if self.mode == "paper":
             pos = self.paper_engine.open_position(order)
             if pos:
@@ -497,12 +516,15 @@ class TradingEngine:
             t = (dte - dte_tighten) / 5.0
             stop_mult = tight_stop + t * (initial_stop - tight_stop)
 
-        pnl = pos.unrealized_pnl()
+        # Use raw P&L (no commission) for stop/profit checks
+        # Commission should not trigger stop losses
+        raw_pnl = pos.raw_pnl()
+        pnl = pos.unrealized_pnl()  # net P&L for display/logging
         max_profit = pos.order.max_profit
 
         if pos.is_credit:
             # Credit spread: close at X% of max profit
-            profit_pct_of_max = pnl / max_profit if max_profit > 0 else 0
+            profit_pct_of_max = raw_pnl / max_profit if max_profit > 0 else 0
             if profit_pct_of_max >= take_profit_pct:
                 await self._close_options_position(
                     current_price,
@@ -512,7 +534,7 @@ class TradingEngine:
 
             # Credit spread stop: loss exceeds stop_mult x credit received
             entry_credit = pos.entry_net_premium * pos.order.contracts * 100
-            if pnl < 0 and abs(pnl) >= entry_credit * stop_mult:
+            if raw_pnl < 0 and abs(raw_pnl) >= entry_credit * stop_mult:
                 await self._close_options_position(
                     current_price,
                     f"stop_loss_{stop_mult:.1f}x_credit",
@@ -522,7 +544,7 @@ class TradingEngine:
             # Debit spread / long option: close at X% gain of premium
             entry_cost = pos.entry_net_premium * pos.order.contracts * 100
             if entry_cost > 0:
-                gain_pct = pnl / entry_cost
+                gain_pct = raw_pnl / entry_cost
                 if gain_pct >= take_profit_pct:
                     await self._close_options_position(
                         current_price,
@@ -544,7 +566,7 @@ class TradingEngine:
         ):
             entry_cost = pos.entry_net_premium * pos.order.contracts * 100
             if entry_cost > 0:
-                total_gain = pnl / entry_cost
+                total_gain = raw_pnl / entry_cost
                 if total_gain <= -stop_mult:
                     await self._close_options_position(
                         current_price,

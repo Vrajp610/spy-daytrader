@@ -236,8 +236,9 @@ class SyntheticChainProvider:
     def generate(
         self, underlying_price: float, atr: float = 2.0,
         dte_min: int = 5, dte_max: int = 14,
+        bar_minutes: int = 1,
     ) -> OptionChainSnapshot:
-        iv = pricing.iv_from_atr(atr, underlying_price)
+        iv = pricing.iv_from_atr(atr, underlying_price, bar_minutes=bar_minutes)
         r = 0.05  # risk-free rate
         now = datetime.now(ET)
         today = now.date()
@@ -354,6 +355,7 @@ class OptionChainProvider:
     async def get_chain(
         self, symbol: str = "SPY",
         underlying_price: float = 0.0, atr: float = 2.0,
+        bar_minutes: int = 1,
     ) -> OptionChainSnapshot:
         """Get option chain, trying Schwab -> Yahoo -> Synthetic."""
         now = time.time()
@@ -382,7 +384,7 @@ class OptionChainProvider:
         # Synthetic fallback
         if underlying_price <= 0:
             underlying_price = 590.0  # reasonable SPY default
-        chain = self._synthetic.generate(underlying_price, atr, dte_min, dte_max)
+        chain = self._synthetic.generate(underlying_price, atr, dte_min, dte_max, bar_minutes=bar_minutes)
         logger.info(f"Generated synthetic chain: {len(chain.calls)} calls, {len(chain.puts)} puts, IV={chain.calls[list(chain.calls.keys())[0]].iv:.1%}" if chain.calls else "Generated empty synthetic chain")
         self._cache = chain
         self._cache_time = now

@@ -83,15 +83,17 @@ class PaperOptionPosition:
         self.best_premium = max(self.best_premium, self.current_premium) if not self.is_credit else min(self.best_premium, self.current_premium)
         self.worst_premium = min(self.worst_premium, self.current_premium) if not self.is_credit else max(self.worst_premium, self.current_premium)
 
-    def unrealized_pnl(self) -> float:
-        """Current unrealized P&L per contract."""
+    def raw_pnl(self) -> float:
+        """Raw P&L from premium movement only (no commission/spread cost).
+        Used for stop-loss and take-profit checks."""
         if self.is_credit:
-            # Credit: profit = entry_premium - current_premium
-            pnl = (self.entry_net_premium - self.current_premium) * self.order.contracts * 100
+            return (self.entry_net_premium - self.current_premium) * self.order.contracts * 100
         else:
-            # Debit: profit = current_premium - entry_premium
-            pnl = (self.current_premium - self.entry_net_premium) * self.order.contracts * 100
-        return pnl - self.commission - (self.spread_cost * self.order.contracts * 100)
+            return (self.current_premium - self.entry_net_premium) * self.order.contracts * 100
+
+    def unrealized_pnl(self) -> float:
+        """Net P&L including commission and spread cost."""
+        return self.raw_pnl() - self.commission - (self.spread_cost * self.order.contracts * 100)
 
     def pnl_pct_of_max(self) -> float:
         """P&L as percentage of max profit (for exit rules)."""
