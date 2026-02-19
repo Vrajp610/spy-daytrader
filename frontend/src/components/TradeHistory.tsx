@@ -79,10 +79,11 @@ export default function TradeHistory({ trades, total }: Props) {
           <thead className="sticky top-0 bg-terminal-800/95 backdrop-blur-sm">
             <tr>
               <SortHeader label="Time" field="entry_time" />
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Type</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Trade</th>
               <SortHeader label="Strategy" field="strategy" />
               <SortHeader label="Dir" field="direction" />
               <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Premium</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Cost</th>
               <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Ct</th>
               <SortHeader label="P&L" field="pnl" />
               <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Reason</th>
@@ -90,7 +91,7 @@ export default function TradeHistory({ trades, total }: Props) {
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-muted">No trades yet</td></tr>
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-muted">No trades yet</td></tr>
             ) : sorted.map((t, i) => (
               <>
                 <tr
@@ -103,9 +104,17 @@ export default function TradeHistory({ trades, total }: Props) {
                   </td>
                   <td className="font-mono text-xxs">
                     {isOptions(t) ? (
-                      <span className="badge badge-paper text-xxs px-1.5">
-                        {TYPE_ABBREV[t.option_strategy_type!] || t.option_strategy_type}
-                      </span>
+                      <div>
+                        <span className="badge badge-paper text-xxs px-1.5">
+                          {TYPE_ABBREV[t.option_strategy_type!] || t.option_strategy_type}
+                        </span>
+                        {t.strike != null && t.expiration_date && (
+                          <div className="text-terminal-300 mt-0.5">
+                            ${t.strike.toFixed(0)}{t.option_type?.[0] || ''}{' '}
+                            {t.expiration_date.slice(5)}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-muted">EQ</span>
                     )}
@@ -136,6 +145,13 @@ export default function TradeHistory({ trades, total }: Props) {
                       <>${t.entry_price.toFixed(2)}</>
                     )}
                   </td>
+                  <td className="font-mono tabular-nums text-terminal-200">
+                    {isOptions(t) ? (
+                      `$${(Math.abs(t.net_premium ?? t.entry_price) * (t.contracts ?? t.quantity) * 100).toFixed(0)}`
+                    ) : (
+                      `$${(t.entry_price * t.quantity).toFixed(0)}`
+                    )}
+                  </td>
                   <td className="tabular-nums">{t.contracts ?? t.quantity}</td>
                   <td className={`font-mono tabular-nums font-medium ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
                     ${t.pnl.toFixed(2)}
@@ -147,10 +163,16 @@ export default function TradeHistory({ trades, total }: Props) {
                 </tr>
                 {expandedId === (t.id ?? i) && (
                   <tr key={`detail-${i}`} className="animate-fade-in !bg-terminal-700/20">
-                    <td colSpan={8} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                         {isOptions(t) && (
                           <>
+                            <div>
+                              <span className="label">Total Cost</span>{' '}
+                              <span className="font-mono text-terminal-200">
+                                ${(Math.abs(t.net_premium ?? 0) * (t.contracts ?? t.quantity) * 100).toFixed(2)}
+                              </span>
+                            </div>
                             <div>
                               <span className="label">Max Loss</span>{' '}
                               <span className="text-loss font-mono">${(t.max_loss ?? 0).toFixed(2)}</span>
@@ -158,7 +180,15 @@ export default function TradeHistory({ trades, total }: Props) {
                             <div>
                               <span className="label">Max Profit</span>{' '}
                               <span className="text-profit font-mono">
-                                {(t.max_profit ?? 0) > 99999 ? 'Unlim' : `$${(t.max_profit ?? 0).toFixed(2)}`}
+                                {(t.max_profit ?? 0) > 99999 ? 'Unlimited' : `$${(t.max_profit ?? 0).toFixed(2)}`}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="label">Risk/Reward</span>{' '}
+                              <span className="font-mono text-terminal-200">
+                                {(t.max_loss ?? 0) > 0 && (t.max_profit ?? 0) < 99999
+                                  ? `1:${((t.max_profit ?? 0) / (t.max_loss ?? 1)).toFixed(2)}`
+                                  : '--'}
                               </span>
                             </div>
                             {t.entry_delta != null && (
@@ -167,10 +197,22 @@ export default function TradeHistory({ trades, total }: Props) {
                                 <span className="font-mono text-terminal-200">{t.entry_delta.toFixed(3)}</span>
                               </div>
                             )}
+                            {t.entry_theta != null && (
+                              <div>
+                                <span className="label">Entry Theta</span>{' '}
+                                <span className="font-mono text-terminal-200">{t.entry_theta.toFixed(3)}</span>
+                              </div>
+                            )}
                             {t.entry_iv != null && (
                               <div>
                                 <span className="label">Entry IV</span>{' '}
                                 <span className="font-mono text-terminal-200">{(t.entry_iv * 100).toFixed(1)}%</span>
+                              </div>
+                            )}
+                            {t.regime && (
+                              <div>
+                                <span className="label">Regime</span>{' '}
+                                <span className="font-mono text-terminal-200">{t.regime.replace(/_/g, ' ')}</span>
                               </div>
                             )}
                             {t.underlying_entry != null && (
@@ -188,7 +230,7 @@ export default function TradeHistory({ trades, total }: Props) {
                             {t.strike != null && (
                               <div>
                                 <span className="label">Strike</span>{' '}
-                                <span className="font-mono text-terminal-200">${t.strike.toFixed(0)}</span>
+                                <span className="font-mono text-terminal-200">${t.strike.toFixed(0)} {t.option_type || ''}</span>
                               </div>
                             )}
                             {t.expiration_date && (
@@ -225,6 +267,20 @@ export default function TradeHistory({ trades, total }: Props) {
                           <div>
                             <span className="label">Commission</span>{' '}
                             <span className="font-mono text-terminal-200">${t.commission.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {t.slippage != null && t.slippage > 0 && (
+                          <div>
+                            <span className="label">Spread Cost</span>{' '}
+                            <span className="font-mono text-terminal-200">${t.slippage.toFixed(4)}</span>
+                          </div>
+                        )}
+                        {t.pnl_pct != null && (
+                          <div>
+                            <span className="label">P&L %</span>{' '}
+                            <span className={`font-mono font-medium ${t.pnl_pct >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct.toFixed(1)}%
+                            </span>
                           </div>
                         )}
                       </div>

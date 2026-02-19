@@ -90,6 +90,8 @@ class TradingEngine:
         self._df_1hr: Optional[pd.DataFrame] = None
         self._df_4hr: Optional[pd.DataFrame] = None
         self._current_chain: Optional[OptionChainSnapshot] = None
+        self._strategy_scores: dict[str, float] = {}
+        self._scores_last_refresh: float = 0.0
 
     async def start(self):
         if self.running:
@@ -174,6 +176,9 @@ class TradingEngine:
                         (now - self._last_chain_fetch).total_seconds() >= 60):
                     await self._fetch_chain()
 
+                # Refresh strategy leaderboard scores
+                await self._refresh_strategy_scores()
+
                 # Broadcast price update
                 last_bar = self._df_1min.iloc[-1]
                 await ws_manager.broadcast("price_update", {
@@ -250,6 +255,31 @@ class TradingEngine:
                 )
         except Exception as e:
             logger.error(f"Chain fetch error: {e}")
+
+    async def _refresh_strategy_scores(self):
+        """Load strategy composite scores from leaderboard for performance weighting."""
+        import time
+        now = time.time()
+        if now - self._scores_last_refresh < 300:  # refresh every 5 minutes
+            return
+        self._scores_last_refresh = now
+        try:
+            from app.database import async_session
+            from app.models import StrategyRanking
+            from sqlalchemy import select
+            async with async_session() as db:
+                stmt = select(StrategyRanking)
+                result = await db.execute(stmt)
+                rankings = result.scalars().all()
+                self._strategy_scores = {
+                    r.strategy_name: r.composite_score
+                    for r in rankings
+                }
+            if self._strategy_scores:
+                top = sorted(self._strategy_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+                logger.info(f"Strategy scores loaded: top 3 = {[(n, f'{s:.1f}') for n, s in top]}")
+        except Exception as e:
+            logger.debug(f"Could not load strategy scores: {e}")
 
     async def _check_entries(self):
         """Check all enabled strategies for entry signals, then map to options."""
@@ -328,6 +358,18 @@ class TradingEngine:
         if not candidates:
             return
 
+        # Weight by historical strategy performance from leaderboard
+        if self._strategy_scores:
+            weighted = []
+            for strat_name, signal, score in candidates:
+                perf_score = self._strategy_scores.get(strat_name, 0.0)
+                # Normalize leaderboard composite_score (typically -20 to 100) to 0-1 range
+                perf_weight = max(0.0, min((perf_score + 20) / 120.0, 1.0))
+                # Blend: 60% signal quality + 40% historical performance
+                blended = score * 0.6 + perf_weight * 0.4
+                weighted.append((strat_name, signal, blended))
+            candidates = weighted
+
         candidates.sort(key=lambda x: x[2], reverse=True)
         strat_name, signal, score = candidates[0]
 
@@ -376,6 +418,12 @@ class TradingEngine:
                     "legs": order.legs_to_json(),
                     "regime": self.current_regime.value,
                     "display": order.to_display_string(),
+                    "confidence": round(order.confidence, 4) if order.confidence else None,
+                    "strike": order.primary_strike,
+                    "expiration_date": order.primary_expiration,
+                    "option_type": order.primary_option_type,
+                    "entry_delta": round(order.net_delta, 4),
+                    "entry_iv": round(order.legs[0].iv, 4) if order.legs else None,
                 })
         else:
             # Live mode — place options order via Schwab
