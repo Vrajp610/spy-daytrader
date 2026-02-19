@@ -129,6 +129,9 @@
   .data-table thead th {
     @apply px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest;
   }
+  .data-table thead th[class*="text-right"] {
+    text-align: right;
+  }
   .data-table tbody tr {
     @apply border-b border-terminal-700/30 hover:bg-terminal-700/20 transition-colors;
   }
