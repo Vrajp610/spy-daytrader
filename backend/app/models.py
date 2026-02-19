@@ -31,6 +31,15 @@ class Trade(Base):
     exit_reason = Column(String, nullable=True)
     is_paper = Column(Boolean, default=True, nullable=False)
     status = Column(String, default="OPEN", nullable=False)  # OPEN / CLOSED
+    confidence = Column(Float, nullable=True)
+    slippage = Column(Float, nullable=True)
+    commission = Column(Float, default=0.0)
+    vix_at_entry = Column(Float, nullable=True)
+    bars_held = Column(Integer, nullable=True)
+    mae = Column(Float, nullable=True)
+    mfe = Column(Float, nullable=True)
+    mae_pct = Column(Float, nullable=True)
+    mfe_pct = Column(Float, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

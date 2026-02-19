@@ -8,6 +8,7 @@ import RiskMetricsCard from './RiskMetrics';
 import TradeHistory from './TradeHistory';
 import BacktestPanel from './BacktestPanel';
 import StrategyConfigPanel from './StrategyConfig';
+import TradingSettingsPanel from './TradingSettings';
 import StrategyLeaderboard from './StrategyLeaderboard';
 
 export default function Dashboard() {
@@ -55,7 +56,10 @@ export default function Dashboard() {
           <div className="lg:col-span-2">
             <BacktestPanel />
           </div>
-          <StrategyConfigPanel />
+          <div className="space-y-4">
+            <TradingSettingsPanel />
+            <StrategyConfigPanel />
+          </div>
         </div>
       </main>
     </div>

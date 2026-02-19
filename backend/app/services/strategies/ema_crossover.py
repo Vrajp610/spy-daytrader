@@ -71,12 +71,15 @@ class EMACrossoverStrategy(BaseStrategy):
                     and close > vwap):
                 stop = close - p["atr_stop_mult"] * atr
                 target = close + p["atr_target_mult"] * atr
+                ema_spread = abs(ema9 - ema21) / close if close > 0 else 0
+                confidence = min(0.85, 0.5 + ema_spread * 10 + max(0, (adx - 20)) * 0.005)
                 return TradeSignal(
                     strategy=self.name,
                     direction=Direction.LONG,
                     entry_price=close,
                     stop_loss=stop,
                     take_profit=target,
+                    confidence=confidence,
                     timestamp=current_time,
                     metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
                 )
@@ -89,12 +92,15 @@ class EMACrossoverStrategy(BaseStrategy):
                     and close < vwap):
                 stop = close + p["atr_stop_mult"] * atr
                 target = close - p["atr_target_mult"] * atr
+                ema_spread = abs(ema9 - ema21) / close if close > 0 else 0
+                confidence = min(0.85, 0.5 + ema_spread * 10 + max(0, (adx - 20)) * 0.005)
                 return TradeSignal(
                     strategy=self.name,
                     direction=Direction.SHORT,
                     entry_price=close,
                     stop_loss=stop,
                     take_profit=target,
+                    confidence=confidence,
                     timestamp=current_time,
                     metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
                 )

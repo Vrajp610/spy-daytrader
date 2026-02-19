@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type {
   BotStatus, AccountInfo, RiskMetrics, BacktestRequest,
-  BacktestResult, StrategyConfig, Trade,
+  BacktestResult, StrategyConfig, Trade, TradingSettings,
   LeaderboardResponse, StrategyComparison,
 } from '../types';
 
@@ -33,6 +33,12 @@ export const getStrategyConfigs = () =>
   api.get<StrategyConfig[]>('/settings/strategies').then(r => r.data);
 export const updateStrategyConfig = (name: string, update: Partial<StrategyConfig>) =>
   api.put<StrategyConfig>(`/settings/strategies/${name}`, update).then(r => r.data);
+
+// Trading Settings
+export const getTradingSettings = () =>
+  api.get<TradingSettings>('/settings/trading').then(r => r.data);
+export const updateTradingSettings = (update: Partial<TradingSettings>) =>
+  api.put<TradingSettings>('/settings/trading', update).then(r => r.data);
 
 // Health
 export const getHealth = () => api.get('/health').then(r => r.data);

@@ -5,13 +5,17 @@ import type { AccountInfo, RiskMetrics } from '../types';
 export function useAccount() {
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [risk, setRisk] = useState<RiskMetrics | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const [a, r] = await Promise.all([getAccountInfo(), getRiskMetrics()]);
       setAccount(a);
       setRisk(r);
-    } catch { /* ignore */ }
+      setError(null);
+    } catch {
+      setError('Failed to fetch account data');
+    }
   }, []);
 
   useEffect(() => {
@@ -20,5 +24,5 @@ export function useAccount() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  return { account, risk, refresh };
+  return { account, risk, refresh, error };
 }

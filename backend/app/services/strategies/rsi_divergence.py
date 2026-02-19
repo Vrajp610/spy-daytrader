@@ -70,12 +70,14 @@ class RSIDivergenceStrategy(BaseStrategy):
                 and rsi <= p["rsi_oversold"]):
             stop = close - p["atr_stop_mult"] * atr
             target = close + p["atr_target_mult"] * atr
+            confidence = min(0.85, 0.5 + max(0, (35 - rsi)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.LONG,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"rsi": rsi, "divergence": "bullish"},
             )
@@ -92,12 +94,14 @@ class RSIDivergenceStrategy(BaseStrategy):
                 and rsi >= p["rsi_overbought"]):
             stop = close + p["atr_stop_mult"] * atr
             target = close - p["atr_target_mult"] * atr
+            confidence = min(0.85, 0.5 + max(0, (rsi - 65)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.SHORT,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"rsi": rsi, "divergence": "bearish"},
             )

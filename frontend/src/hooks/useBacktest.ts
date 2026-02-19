@@ -32,7 +32,9 @@ export function useBacktest() {
       if (data.length > 0 && !current) {
         setCurrent(data[0]);
       }
-    } catch { /* ignore */ }
+    } catch {
+      setError('Failed to load backtest history');
+    }
   }, [current]);
 
   return { results, current, loading, error, run, loadHistory };

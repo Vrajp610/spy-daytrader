@@ -4,6 +4,7 @@ import type { WSMessage } from '../types';
 export function useWebSocket() {
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const reconnectAttempt = useRef(0);
@@ -14,6 +15,7 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setConnected(true);
+      setError(null);
       reconnectAttempt.current = 0;
       // Heartbeat
       const ping = setInterval(() => {
@@ -26,7 +28,7 @@ export function useWebSocket() {
       try {
         const msg: WSMessage = JSON.parse(event.data);
         if (msg.type !== 'pong') setLastMessage(msg);
-      } catch { /* ignore */ }
+      } catch (e) { console.error('Failed to parse WS message:', e); }
     };
 
     ws.onclose = () => {
@@ -36,7 +38,10 @@ export function useWebSocket() {
       reconnectTimer.current = setTimeout(connect, delay);
     };
 
-    ws.onerror = () => ws.close();
+    ws.onerror = () => {
+      setError('WebSocket connection error');
+      ws.close();
+    };
     wsRef.current = ws;
   }, []);
 
@@ -48,5 +53,5 @@ export function useWebSocket() {
     };
   }, [connect]);
 
-  return { lastMessage, connected };
+  return { lastMessage, connected, error };
 }

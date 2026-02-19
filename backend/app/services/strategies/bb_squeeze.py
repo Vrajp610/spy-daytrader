@@ -81,6 +81,8 @@ class BBSqueezeStrategy(BaseStrategy):
         if pd.isna(vol_ratio) or vol_ratio < p["volume_surge_ratio"]:
             return None
 
+        confidence = min(0.85, 0.5 + max(0, (vol_ratio - 1.3)) * 0.1)
+
         # Direction: breakout above upper BB → long, below lower → short
         if close > bb_upper:
             stop = close - p["atr_stop_mult"] * atr
@@ -91,6 +93,7 @@ class BBSqueezeStrategy(BaseStrategy):
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
             )
@@ -104,6 +107,7 @@ class BBSqueezeStrategy(BaseStrategy):
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
             )

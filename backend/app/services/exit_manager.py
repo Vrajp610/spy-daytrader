@@ -72,6 +72,8 @@ class ExitManager:
         current_price: float,
         atr: float,
         strategy_exit: Optional[ExitSignal] = None,
+        df=None,
+        idx: Optional[int] = None,
     ) -> Optional[ExitSignal]:
         """Check exit conditions in priority order.
 
@@ -80,6 +82,8 @@ class ExitManager:
             current_price: Latest bar close price.
             atr: Current ATR value for the instrument.
             strategy_exit: Exit signal from the strategy's should_exit(), if any.
+            df: DataFrame with indicators (for momentum exhaustion check).
+            idx: Current bar index in df.
 
         Returns:
             ExitSignal if an exit/scale-out should occur, None otherwise.
@@ -96,6 +100,12 @@ class ExitManager:
         trailing_signal = self._check_adaptive_trailing(state, current_price, atr)
         if trailing_signal is not None:
             return trailing_signal
+
+        # 2b. Check momentum exhaustion
+        if df is not None and idx is not None:
+            momentum_signal = self.check_momentum_exhaustion(state, df, idx)
+            if momentum_signal is not None:
+                return momentum_signal
 
         # 3. Check effective stop (may be breakeven after scale-out)
         stop_signal = self._check_effective_stop(state, current_price)
@@ -196,8 +206,13 @@ class ExitManager:
         if scale_num <= len(self.scales):
             scale = self.scales[scale_num - 1]
             if scale.move_stop_to_breakeven:
-                updates["effective_stop"] = state.entry_price
-                logger.info(f"Stop moved to breakeven @ {state.entry_price:.2f}")
+                # Add small buffer to avoid noise-triggered breakeven stops
+                buffer = 0.02  # 2 cents
+                if state.direction == "LONG":
+                    updates["effective_stop"] = state.entry_price + buffer
+                else:
+                    updates["effective_stop"] = state.entry_price - buffer
+                logger.info(f"Stop moved to breakeven @ {updates['effective_stop']:.2f} (with {buffer} buffer)")
             if scale.new_trailing_atr_mult is not None:
                 updates["trailing_atr_mult"] = scale.new_trailing_atr_mult
 
@@ -244,6 +259,39 @@ class ExitManager:
             )
         return None
 
+    def check_momentum_exhaustion(
+        self, state: PositionState, df, idx: int
+    ) -> Optional[ExitSignal]:
+        """Exit if momentum is exhausting (RSI reversal from extreme)."""
+        import pandas as pd
+
+        if idx < 2:
+            return None
+        rsi = df.iloc[idx].get("rsi")
+        prev_rsi = df.iloc[idx - 1].get("rsi")
+        if rsi is None or prev_rsi is None:
+            return None
+        if isinstance(rsi, float) and pd.isna(rsi):
+            return None
+        if isinstance(prev_rsi, float) and pd.isna(prev_rsi):
+            return None
+
+        if state.direction == "LONG":
+            # Was overbought, now dropping
+            if prev_rsi > 70 and rsi < 65:
+                return ExitSignal(
+                    reason=ExitReason.TAKE_PROFIT,
+                    exit_price=float(df.iloc[idx]["close"]),
+                )
+        else:
+            # Was oversold, now rising
+            if prev_rsi < 30 and rsi > 35:
+                return ExitSignal(
+                    reason=ExitReason.TAKE_PROFIT,
+                    exit_price=float(df.iloc[idx]["close"]),
+                )
+        return None
+
     def _compute_trailing_stop(
         self,
         state: PositionState,
@@ -262,19 +310,11 @@ class ExitManager:
     def _adaptive_trailing_mult(
         profit_atr: float, current_mult: Optional[float]
     ) -> Optional[float]:
-        """Determine trailing ATR multiplier based on profit level.
-
-        | Profit Level | Trailing Distance |
-        |---|---|
-        | < 1 ATR | Strategy's default (None) |
-        | 1-2 ATR | 0.75x ATR |
-        | > 2 ATR | 0.50x ATR |
-        """
-        if profit_atr > 2.0:
-            return 0.50
-        elif profit_atr >= 1.0:
-            return 0.75
-        return current_mult
+        """Smooth adaptive trailing: tightens continuously as profit grows."""
+        if profit_atr < 1.0:
+            return current_mult
+        # Smooth curve: starts at 1.0x ATR at 1 ATR profit, tightens to 0.3x ATR
+        return max(0.3, 1.5 - 0.5 * profit_atr)
 
     @staticmethod
     def _profit_in_price(state: PositionState, current_price: float) -> float:

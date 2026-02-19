@@ -88,12 +88,15 @@ class GapFillStrategy(BaseStrategy):
         if gap_pct > 0 and close > prior_close:
             stop = close + p["atr_stop_mult"] * atr
             target = prior_close
+            fill_dist_ratio = abs(close - prior_close) / abs(gap_pct * prior_close) if abs(gap_pct * prior_close) > 0 else 0
+            confidence = min(0.80, 0.5 + abs(gap_pct) * 30 + fill_dist_ratio * 0.1)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.SHORT,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"gap_pct": gap_pct, "prior_close": prior_close},
             )
@@ -102,12 +105,15 @@ class GapFillStrategy(BaseStrategy):
         if gap_pct < 0 and close < prior_close:
             stop = close - p["atr_stop_mult"] * atr
             target = prior_close
+            fill_dist_ratio = abs(close - prior_close) / abs(gap_pct * prior_close) if abs(gap_pct * prior_close) > 0 else 0
+            confidence = min(0.80, 0.5 + abs(gap_pct) * 30 + fill_dist_ratio * 0.1)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.LONG,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"gap_pct": gap_pct, "prior_close": prior_close},
             )

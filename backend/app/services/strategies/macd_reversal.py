@@ -93,12 +93,15 @@ class MACDReversalStrategy(BaseStrategy):
             if rising:
                 stop = close - p["atr_stop_mult"] * atr
                 target = close + p["atr_target_mult"] * atr
+                hist_pct = abs(macd_hist) / abs(extreme_low) if abs(extreme_low) > 0 else 0
+                confidence = min(0.85, 0.5 + hist_pct * 0.3 + max(0, (vol_ratio - 1.2)) * 0.1)
                 return TradeSignal(
                     strategy=self.name,
                     direction=Direction.LONG,
                     entry_price=close,
                     stop_loss=stop,
                     take_profit=target,
+                    confidence=confidence,
                     timestamp=current_time,
                     metadata={"macd_hist": macd_hist, "reversal": "bullish"},
                 )
@@ -127,12 +130,15 @@ class MACDReversalStrategy(BaseStrategy):
             if falling:
                 stop = close + p["atr_stop_mult"] * atr
                 target = close - p["atr_target_mult"] * atr
+                hist_pct = abs(macd_hist) / abs(extreme_high) if abs(extreme_high) > 0 else 0
+                confidence = min(0.85, 0.5 + hist_pct * 0.3 + max(0, (vol_ratio - 1.2)) * 0.1)
                 return TradeSignal(
                     strategy=self.name,
                     direction=Direction.SHORT,
                     entry_price=close,
                     stop_loss=stop,
                     take_profit=target,
+                    confidence=confidence,
                     timestamp=current_time,
                     metadata={"macd_hist": macd_hist, "reversal": "bearish"},
                 )

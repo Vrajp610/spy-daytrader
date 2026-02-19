@@ -60,3 +60,45 @@ async def get_daily_performance():
             {"date": d, **vals} for d, vals in sorted(daily.items())
         ]
     }
+
+
+@router.get("/analytics/mae-mfe")
+async def get_mae_mfe_analytics():
+    """MAE/MFE analytics grouped by strategy."""
+    from app.database import async_session
+    from app.models import Trade as TradeModel
+    from sqlalchemy import select, func
+
+    async with async_session() as db:
+        stmt = (
+            select(
+                TradeModel.strategy,
+                func.count(TradeModel.id).label("trade_count"),
+                func.avg(TradeModel.mae).label("avg_mae"),
+                func.avg(TradeModel.mfe).label("avg_mfe"),
+                func.avg(TradeModel.mae_pct).label("avg_mae_pct"),
+                func.avg(TradeModel.mfe_pct).label("avg_mfe_pct"),
+                func.avg(TradeModel.bars_held).label("avg_bars_held"),
+                func.avg(TradeModel.confidence).label("avg_confidence"),
+            )
+            .where(TradeModel.status == "CLOSED")
+            .where(TradeModel.mae.isnot(None))
+            .group_by(TradeModel.strategy)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+    analytics = []
+    for row in rows:
+        analytics.append({
+            "strategy": row.strategy,
+            "trade_count": row.trade_count,
+            "avg_mae": round(row.avg_mae, 2) if row.avg_mae else 0,
+            "avg_mfe": round(row.avg_mfe, 2) if row.avg_mfe else 0,
+            "avg_mae_pct": round(row.avg_mae_pct, 3) if row.avg_mae_pct else 0,
+            "avg_mfe_pct": round(row.avg_mfe_pct, 3) if row.avg_mfe_pct else 0,
+            "avg_bars_held": round(row.avg_bars_held, 1) if row.avg_bars_held else 0,
+            "avg_confidence": round(row.avg_confidence, 3) if row.avg_confidence else 0,
+        })
+
+    return {"analytics": analytics}

@@ -41,8 +41,8 @@ class MomentumScalperStrategy(BaseStrategy):
         delta = closes.diff()
         gain = delta.where(delta > 0, 0.0)
         loss = -delta.where(delta < 0, 0.0)
-        avg_gain = gain.mean()
-        avg_loss = loss.mean()
+        avg_gain = gain.ewm(alpha=1/period, adjust=False).mean().iloc[-1]
+        avg_loss = loss.ewm(alpha=1/period, adjust=False).mean().iloc[-1]
         if avg_loss == 0:
             return 100.0
         rs = avg_gain / avg_loss
@@ -84,12 +84,15 @@ class MomentumScalperStrategy(BaseStrategy):
                 and close > ema9):
             stop = close - p["atr_stop_mult"] * atr
             target = close + p["atr_target_mult"] * atr
+            rsi_bounce = abs(fast_rsi - prev_fast_rsi)
+            confidence = min(0.80, 0.5 + rsi_bounce * 0.01 + max(0, (adx - 20)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.LONG,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"fast_rsi": fast_rsi, "adx": adx},
             )
@@ -100,12 +103,15 @@ class MomentumScalperStrategy(BaseStrategy):
                 and close < ema9):
             stop = close + p["atr_stop_mult"] * atr
             target = close - p["atr_target_mult"] * atr
+            rsi_bounce = abs(fast_rsi - prev_fast_rsi)
+            confidence = min(0.80, 0.5 + rsi_bounce * 0.01 + max(0, (adx - 20)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.SHORT,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"fast_rsi": fast_rsi, "adx": adx},
             )

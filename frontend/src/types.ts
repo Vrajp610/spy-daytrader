@@ -44,6 +44,14 @@ export interface Trade {
   pnl_pct?: number;
   exit_reason: string;
   is_partial?: boolean;
+  confidence?: number;
+  slippage?: number;
+  commission?: number;
+  mae?: number;
+  mfe?: number;
+  mae_pct?: number;
+  mfe_pct?: number;
+  bars_held?: number;
 }
 
 export interface AccountInfo {
@@ -111,6 +119,19 @@ export interface DailyPerformance {
   trades: number;
   wins: number;
   losses: number;
+}
+
+// ── Trading Settings ────────────────────────────────────────────
+
+export interface TradingSettings {
+  initial_capital: number;
+  max_risk_per_trade: number;
+  daily_loss_limit: number;
+  max_drawdown: number;
+  max_position_pct: number;
+  max_trades_per_day: number;
+  cooldown_after_consecutive_losses: number;
+  cooldown_minutes: number;
 }
 
 // ── WebSocket Message ────────────────────────────────────────────

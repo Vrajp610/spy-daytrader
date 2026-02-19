@@ -92,15 +92,19 @@ class DoubleBottomTopStrategy(BaseStrategy):
                     # Found double bottom - neckline is max between the two lows
                     neckline = df.iloc[idx_i:idx_j + 1]["high"].max()
                     pattern_height = neckline - min(price_i, price_j)
-                    if close > neckline and (pd.isna(vol_ratio) or vol_ratio >= p["volume_surge_ratio"]):
+                    if close > neckline and (not pd.isna(vol_ratio) and vol_ratio >= p["volume_surge_ratio"]):
                         stop = close - p["atr_stop_mult"] * atr
                         target = close + pattern_height
+                        symmetry = 1.0 - abs(price_i - price_j) / (min(price_i, price_j) * tol) if tol > 0 else 0
+                        symmetry = max(0, symmetry)
+                        confidence = min(0.85, 0.5 + symmetry * 0.2 + max(0, (vol_ratio - 1.2)) * 0.1)
                         return TradeSignal(
                             strategy=self.name,
                             direction=Direction.LONG,
                             entry_price=close,
                             stop_loss=stop,
                             take_profit=target,
+                            confidence=confidence,
                             timestamp=current_time,
                             metadata={"pattern": "double_bottom", "neckline": neckline},
                         )
@@ -116,15 +120,19 @@ class DoubleBottomTopStrategy(BaseStrategy):
                 if abs(price_i - price_j) / max(price_i, price_j) <= tol:
                     neckline = df.iloc[idx_i:idx_j + 1]["low"].min()
                     pattern_height = max(price_i, price_j) - neckline
-                    if close < neckline and (pd.isna(vol_ratio) or vol_ratio >= p["volume_surge_ratio"]):
+                    if close < neckline and (not pd.isna(vol_ratio) and vol_ratio >= p["volume_surge_ratio"]):
                         stop = close + p["atr_stop_mult"] * atr
                         target = close - pattern_height
+                        symmetry = 1.0 - abs(price_i - price_j) / (min(price_i, price_j) * tol) if tol > 0 else 0
+                        symmetry = max(0, symmetry)
+                        confidence = min(0.85, 0.5 + symmetry * 0.2 + max(0, (vol_ratio - 1.2)) * 0.1)
                         return TradeSignal(
                             strategy=self.name,
                             direction=Direction.SHORT,
                             entry_price=close,
                             stop_loss=stop,
                             take_profit=target,
+                            confidence=confidence,
                             timestamp=current_time,
                             metadata={"pattern": "double_top", "neckline": neckline},
                         )

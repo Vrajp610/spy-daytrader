@@ -1,4 +1,4 @@
-"""Settings routes: strategy configuration."""
+"""Settings routes: strategy configuration and trading settings."""
 
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import StrategyConfig
-from app.schemas import StrategyConfigOut, StrategyConfigUpdate
+from app.config import settings
+from app.schemas import (
+    StrategyConfigOut, StrategyConfigUpdate,
+    TradingSettingsOut, TradingSettingsUpdate,
+)
 from app.services.trading_engine import trading_engine
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -71,3 +75,76 @@ async def update_strategy_config(
     await db.commit()
     await db.refresh(config)
     return StrategyConfigOut.model_validate(config)
+
+
+@router.get("/trading", response_model=TradingSettingsOut)
+async def get_trading_settings():
+    """Get current trading configuration."""
+    return TradingSettingsOut(
+        initial_capital=settings.initial_capital,
+        max_risk_per_trade=settings.max_risk_per_trade,
+        daily_loss_limit=settings.daily_loss_limit,
+        max_drawdown=settings.max_drawdown,
+        max_position_pct=settings.max_position_pct,
+        max_trades_per_day=settings.max_trades_per_day,
+        cooldown_after_consecutive_losses=settings.cooldown_after_consecutive_losses,
+        cooldown_minutes=settings.cooldown_minutes,
+    )
+
+
+@router.put("/trading", response_model=TradingSettingsOut)
+async def update_trading_settings(update: TradingSettingsUpdate):
+    """Update trading configuration. Changes take effect immediately."""
+    if update.initial_capital is not None:
+        if update.initial_capital < 100:
+            raise HTTPException(400, "Initial capital must be >= $100")
+        settings.initial_capital = update.initial_capital
+        # Update paper engine if not running
+        if not trading_engine.running:
+            trading_engine.paper_engine.capital = update.initial_capital
+            trading_engine.paper_engine.initial_capital = update.initial_capital
+            trading_engine.paper_engine.peak_capital = update.initial_capital
+
+    if update.max_risk_per_trade is not None:
+        if not 0.001 <= update.max_risk_per_trade <= 0.10:
+            raise HTTPException(400, "Max risk per trade must be between 0.1% and 10%")
+        settings.max_risk_per_trade = update.max_risk_per_trade
+        trading_engine.risk_manager.max_risk_per_trade = update.max_risk_per_trade
+
+    if update.daily_loss_limit is not None:
+        if not 0.005 <= update.daily_loss_limit <= 0.20:
+            raise HTTPException(400, "Daily loss limit must be between 0.5% and 20%")
+        settings.daily_loss_limit = update.daily_loss_limit
+        trading_engine.risk_manager.daily_loss_limit = update.daily_loss_limit
+
+    if update.max_drawdown is not None:
+        if not 0.02 <= update.max_drawdown <= 0.50:
+            raise HTTPException(400, "Max drawdown must be between 2% and 50%")
+        settings.max_drawdown = update.max_drawdown
+        trading_engine.risk_manager.max_drawdown = update.max_drawdown
+
+    if update.max_position_pct is not None:
+        if not 0.05 <= update.max_position_pct <= 1.0:
+            raise HTTPException(400, "Max position % must be between 5% and 100%")
+        settings.max_position_pct = update.max_position_pct
+        trading_engine.risk_manager.max_position_pct = update.max_position_pct
+
+    if update.max_trades_per_day is not None:
+        if not 1 <= update.max_trades_per_day <= 100:
+            raise HTTPException(400, "Max trades per day must be between 1 and 100")
+        settings.max_trades_per_day = update.max_trades_per_day
+        trading_engine.risk_manager.max_trades_per_day = update.max_trades_per_day
+
+    if update.cooldown_after_consecutive_losses is not None:
+        if not 1 <= update.cooldown_after_consecutive_losses <= 20:
+            raise HTTPException(400, "Cooldown after losses must be between 1 and 20")
+        settings.cooldown_after_consecutive_losses = update.cooldown_after_consecutive_losses
+        trading_engine.risk_manager.cooldown_after_losses = update.cooldown_after_consecutive_losses
+
+    if update.cooldown_minutes is not None:
+        if not 1 <= update.cooldown_minutes <= 240:
+            raise HTTPException(400, "Cooldown minutes must be between 1 and 240")
+        settings.cooldown_minutes = update.cooldown_minutes
+        trading_engine.risk_manager.cooldown_minutes = update.cooldown_minutes
+
+    return await get_trading_settings()

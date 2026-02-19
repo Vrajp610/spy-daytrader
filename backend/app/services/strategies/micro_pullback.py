@@ -69,12 +69,16 @@ class MicroPullbackStrategy(BaseStrategy):
                 if rsi is not None and rsi < 70:
                     stop = close - p["atr_stop_mult"] * atr
                     target = close + p["atr_target_mult"] * atr
+                    pullback_precision = 1.0 - abs(low - ema9) / (atr if atr > 0 else 1)
+                    pullback_precision = max(0, pullback_precision)
+                    confidence = min(0.85, 0.5 + max(0, (adx - 30)) * 0.005 + pullback_precision * 0.1)
                     return TradeSignal(
                         strategy=self.name,
                         direction=Direction.LONG,
                         entry_price=close,
                         stop_loss=stop,
                         take_profit=target,
+                        confidence=confidence,
                         timestamp=current_time,
                         metadata={"adx": adx, "ema9": ema9, "pullback": "up"},
                     )
@@ -85,12 +89,16 @@ class MicroPullbackStrategy(BaseStrategy):
                 if rsi is not None and rsi > 30:
                     stop = close + p["atr_stop_mult"] * atr
                     target = close - p["atr_target_mult"] * atr
+                    pullback_precision = 1.0 - abs(high - ema9) / (atr if atr > 0 else 1)
+                    pullback_precision = max(0, pullback_precision)
+                    confidence = min(0.85, 0.5 + max(0, (adx - 30)) * 0.005 + pullback_precision * 0.1)
                     return TradeSignal(
                         strategy=self.name,
                         direction=Direction.SHORT,
                         entry_price=close,
                         stop_loss=stop,
                         take_profit=target,
+                        confidence=confidence,
                         timestamp=current_time,
                         metadata={"adx": adx, "ema9": ema9, "pullback": "down"},
                     )

@@ -113,6 +113,53 @@ class DataManager:
             df = df[df.index.notna()]
 
         df.columns = [c.lower() for c in df.columns]
+        df = DataManager.validate_bars(df)
+
+        # Stale data check
+        if not df.empty and df.index.tz is not None:
+            last_bar_time = df.index[-1]
+            now = pd.Timestamp.now(tz="America/New_York")
+            staleness = (now - last_bar_time).total_seconds()
+            if staleness > 300:  # 5 minutes
+                from datetime import time as dt_time
+                market_open = dt_time(9, 30)
+                market_close = dt_time(16, 0)
+                current_time = now.time()
+                if market_open <= current_time <= market_close:
+                    logger.warning(f"Stale data: last bar is {staleness:.0f}s old ({last_bar_time})")
+
+        return df
+
+    @staticmethod
+    def validate_bars(df: pd.DataFrame) -> pd.DataFrame:
+        """Validate and clean OHLCV data."""
+        if df.empty:
+            return df
+
+        original_len = len(df)
+
+        # Remove rows with non-positive prices
+        price_cols = ["open", "high", "low", "close"]
+        existing_cols = [c for c in price_cols if c in df.columns]
+        for col in existing_cols:
+            df = df[df[col] > 0]
+
+        # Fix high < low (swap)
+        if "high" in df.columns and "low" in df.columns:
+            mask = df["high"] < df["low"]
+            if mask.any():
+                df.loc[mask, ["high", "low"]] = df.loc[mask, ["low", "high"]].values
+
+        # Remove duplicate timestamps
+        df = df[~df.index.duplicated(keep="last")]
+
+        # Sort by timestamp
+        df = df.sort_index()
+
+        dropped = original_len - len(df)
+        if dropped > 0:
+            logger.warning(f"Data validation: dropped {dropped}/{original_len} invalid bars")
+
         return df
 
     @staticmethod

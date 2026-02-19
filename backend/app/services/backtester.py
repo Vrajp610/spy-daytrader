@@ -120,10 +120,14 @@ class BacktestResult:
         returns = pd.Series(equities).pct_change().dropna()
         if returns.std() == 0:
             return 0.0
-        # Annualize assuming ~252 trading days, ~78 5-min bars per day
-        daily_returns = returns.mean()
-        daily_std = returns.std()
-        return (daily_returns / daily_std) * np.sqrt(252) if daily_std > 0 else 0.0
+        # Compute bars-per-day from actual timestamp range
+        first_ts = pd.Timestamp(self.equity_curve[0]["timestamp"])
+        last_ts = pd.Timestamp(self.equity_curve[-1]["timestamp"])
+        calendar_days = max(1, (last_ts - first_ts).days)
+        trading_days = max(1, calendar_days * 5 / 7)
+        bars_per_day = len(self.equity_curve) / trading_days
+        bars_per_year = bars_per_day * 252
+        return (returns.mean() / returns.std()) * np.sqrt(bars_per_year)
 
     def to_dict(self) -> dict:
         return {
@@ -206,6 +210,7 @@ class Backtester:
         peak_capital = capital
 
         open_trade: Optional[dict] = None
+        pending_signal: Optional[tuple] = None
         highest_since_entry = 0.0
         lowest_since_entry = float("inf")
 
@@ -235,6 +240,10 @@ class Backtester:
                     capital += pnl
                     daily_pnl += pnl
                     peak_capital = max(peak_capital, capital)
+                    mae_val, mfe_val = self._calc_mae_mfe(
+                        open_trade["signal"], highest_since_entry,
+                        lowest_since_entry, remaining_qty
+                    )
                     result.trades.append({
                         "strategy": open_trade["strategy"],
                         "direction": open_trade["signal"].direction.value,
@@ -246,9 +255,13 @@ class Backtester:
                         "pnl": round(pnl, 2),
                         "exit_reason": "eod",
                         "regime": regime.value if regime else "unknown",
+                        "mae": mae_val,
+                        "mfe": mfe_val,
+                        "bars_held": idx - open_trade.get("entry_bar_idx", idx),
                     })
                     open_trade = None
 
+                pending_signal = None
                 current_date = bar_date
                 daily_trades = 0
                 daily_pnl = 0.0
@@ -314,7 +327,7 @@ class Backtester:
 
                     # Check exits via ExitManager
                     exit_signal = self.exit_manager.check_exit(
-                        state, float(close), atr, strategy_exit
+                        state, float(close), atr, strategy_exit, df=df, idx=idx
                     )
 
                     if exit_signal:
@@ -329,6 +342,10 @@ class Backtester:
                             daily_pnl += pnl
                             peak_capital = max(peak_capital, capital)
 
+                            mae_val, mfe_val = self._calc_mae_mfe(
+                                open_trade["signal"], highest_since_entry,
+                                lowest_since_entry, partial_qty
+                            )
                             result.trades.append({
                                 "strategy": open_trade["strategy"],
                                 "direction": open_trade["signal"].direction.value,
@@ -341,6 +358,9 @@ class Backtester:
                                 "exit_reason": exit_signal.reason.value,
                                 "regime": regime.value,
                                 "is_partial": True,
+                                "mae": mae_val,
+                                "mfe": mfe_val,
+                                "bars_held": idx - open_trade.get("entry_bar_idx", idx),
                             })
 
                             open_trade["remaining_quantity"] -= partial_qty
@@ -369,6 +389,10 @@ class Backtester:
                             daily_pnl += pnl
                             peak_capital = max(peak_capital, capital)
 
+                            mae_val, mfe_val = self._calc_mae_mfe(
+                                open_trade["signal"], highest_since_entry,
+                                lowest_since_entry, remaining_qty
+                            )
                             result.trades.append({
                                 "strategy": open_trade["strategy"],
                                 "direction": open_trade["signal"].direction.value,
@@ -380,6 +404,9 @@ class Backtester:
                                 "pnl": round(pnl, 2),
                                 "exit_reason": exit_signal.reason.value,
                                 "regime": regime.value,
+                                "mae": mae_val,
+                                "mfe": mfe_val,
+                                "bars_held": idx - open_trade.get("entry_bar_idx", idx),
                             })
                             open_trade = None
 
@@ -405,8 +432,45 @@ class Backtester:
             if drawdown >= self.max_drawdown:
                 continue
 
-            # Try to open new trade
-            if open_trade is None:
+            # Execute pending signal from previous bar
+            if pending_signal is not None and open_trade is None:
+                strat_name, signal = pending_signal
+                pending_signal = None
+
+                # Use current bar's open as actual entry price
+                actual_entry = float(bar["open"])
+                price_diff = actual_entry - signal.entry_price
+                signal.entry_price = actual_entry
+                signal.stop_loss += price_diff
+                signal.take_profit += price_diff
+
+                # Position sizing with actual entry price
+                risk_amount = capital * self.max_risk_per_trade
+                stop_dist = abs(signal.entry_price - signal.stop_loss)
+                if stop_dist > 0:
+                    quantity = int(risk_amount / stop_dist)
+                    max_shares = int((capital * 0.30) / signal.entry_price)
+                    quantity = min(quantity, max_shares)
+                    if quantity > 0:
+                        signal.quantity = quantity
+                        open_trade = {
+                            "signal": signal,
+                            "strategy": strat_name,
+                            "entry_time": bar_time,
+                            "entry_bar_idx": idx,
+                            "quantity": quantity,
+                            "remaining_quantity": quantity,
+                            "original_quantity": quantity,
+                            "scales_completed": [],
+                            "effective_stop": signal.stop_loss,
+                            "trailing_atr_mult": None,
+                        }
+                        highest_since_entry = float(bar["high"])
+                        lowest_since_entry = float(bar["low"])
+                        daily_trades += 1
+
+            # Try to generate signals (will be executed next bar)
+            if open_trade is None and pending_signal is None:
                 allowed_strategies = list(self.strategy_instances.keys())
                 if self.use_regime_filter:
                     allowed_strategies = [
@@ -438,35 +502,7 @@ class Backtester:
                         signal = strategy.generate_signal(df, idx, bar_time)
 
                     if signal:
-                        # Position sizing
-                        risk_amount = capital * self.max_risk_per_trade
-                        stop_dist = abs(signal.entry_price - signal.stop_loss)
-                        if stop_dist <= 0:
-                            continue
-                        quantity = int(risk_amount / stop_dist)
-                        if quantity <= 0:
-                            continue
-                        # Position cap: max 30% of capital
-                        max_shares = int((capital * 0.30) / signal.entry_price)
-                        quantity = min(quantity, max_shares)
-                        if quantity <= 0:
-                            continue
-
-                        signal.quantity = quantity
-                        open_trade = {
-                            "signal": signal,
-                            "strategy": strat_name,
-                            "entry_time": bar_time,
-                            "quantity": quantity,
-                            "remaining_quantity": quantity,
-                            "original_quantity": quantity,
-                            "scales_completed": [],
-                            "effective_stop": signal.stop_loss,
-                            "trailing_atr_mult": None,
-                        }
-                        highest_since_entry = bar["high"]
-                        lowest_since_entry = bar["low"]
-                        daily_trades += 1
+                        pending_signal = (strat_name, signal)
                         break
 
         # Close any remaining open trade at last bar
@@ -475,6 +511,10 @@ class Backtester:
             remaining_qty = open_trade["remaining_quantity"]
             pnl = self._calc_pnl(open_trade["signal"], last_close, remaining_qty)
             capital += pnl
+            mae_val, mfe_val = self._calc_mae_mfe(
+                open_trade["signal"], highest_since_entry,
+                lowest_since_entry, remaining_qty
+            )
             result.trades.append({
                 "strategy": open_trade["strategy"],
                 "direction": open_trade["signal"].direction.value,
@@ -486,6 +526,9 @@ class Backtester:
                 "pnl": round(pnl, 2),
                 "exit_reason": "eod",
                 "regime": "unknown",
+                "mae": mae_val,
+                "mfe": mfe_val,
+                "bars_held": len(df) - 1 - open_trade.get("entry_bar_idx", len(df) - 1),
             })
 
         result.final_capital = round(capital, 2)
@@ -504,8 +547,33 @@ class Backtester:
         return result
 
     @staticmethod
-    def _calc_pnl(signal: TradeSignal, exit_price: float, quantity: int) -> float:
+    def _calc_pnl(
+        signal: TradeSignal, exit_price: float, quantity: int,
+        slippage_bps: float = 1.0, commission_per_share: float = 0.005,
+    ) -> float:
+        """Calculate P&L including transaction costs (slippage + commission)."""
+        entry_slip = signal.entry_price * (slippage_bps / 10000)
+        exit_slip = exit_price * (slippage_bps / 10000)
+
         if signal.direction == Direction.LONG:
-            return (exit_price - signal.entry_price) * quantity
+            effective_entry = signal.entry_price + entry_slip
+            effective_exit = exit_price - exit_slip
+            raw_pnl = (effective_exit - effective_entry) * quantity
         else:
-            return (signal.entry_price - exit_price) * quantity
+            effective_entry = signal.entry_price - entry_slip
+            effective_exit = exit_price + exit_slip
+            raw_pnl = (effective_entry - effective_exit) * quantity
+
+        commission = commission_per_share * quantity * 2  # round trip
+        return raw_pnl - commission
+
+    @staticmethod
+    def _calc_mae_mfe(signal: TradeSignal, highest: float, lowest: float, qty: int) -> tuple[float, float]:
+        """Return (mae, mfe) in dollar terms."""
+        if signal.direction == Direction.LONG:
+            mfe = (highest - signal.entry_price) * qty
+            mae = (signal.entry_price - lowest) * qty
+        else:
+            mfe = (signal.entry_price - lowest) * qty
+            mae = (highest - signal.entry_price) * qty
+        return round(max(0, mae), 2), round(max(0, mfe), 2)

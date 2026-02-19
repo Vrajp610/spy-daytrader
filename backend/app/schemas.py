@@ -26,6 +26,14 @@ class TradeOut(BaseModel):
     exit_reason: Optional[str] = None
     is_paper: bool
     status: str
+    confidence: Optional[float] = None
+    slippage: Optional[float] = None
+    commission: Optional[float] = None
+    mae: Optional[float] = None
+    mfe: Optional[float] = None
+    mae_pct: Optional[float] = None
+    mfe_pct: Optional[float] = None
+    bars_held: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -175,6 +183,30 @@ class RiskMetrics(BaseModel):
     consecutive_losses: int
     cooldown_active: bool
     circuit_breaker_active: bool
+
+
+# ── Trading Settings ─────────────────────────────────────────────────────────
+
+class TradingSettingsOut(BaseModel):
+    initial_capital: float
+    max_risk_per_trade: float
+    daily_loss_limit: float
+    max_drawdown: float
+    max_position_pct: float
+    max_trades_per_day: int
+    cooldown_after_consecutive_losses: int
+    cooldown_minutes: int
+
+
+class TradingSettingsUpdate(BaseModel):
+    initial_capital: Optional[float] = None
+    max_risk_per_trade: Optional[float] = None
+    daily_loss_limit: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    max_position_pct: Optional[float] = None
+    max_trades_per_day: Optional[int] = None
+    cooldown_after_consecutive_losses: Optional[int] = None
+    cooldown_minutes: Optional[int] = None
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

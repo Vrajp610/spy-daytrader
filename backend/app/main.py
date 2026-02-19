@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+import json as _json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -13,11 +14,30 @@ from app.websocket import ws_manager
 from app.routes import trading, backtest, account, settings as settings_routes
 from app.routes import leaderboard
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+class StructuredFormatter(logging.Formatter):
+    """JSON-structured log output for production monitoring."""
+    def format(self, record):
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        # Include extra fields if present
+        for field in ("trade_id", "strategy", "correlation_id"):
+            val = getattr(record, field, None)
+            if val is not None:
+                log_entry[field] = val
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return _json.dumps(log_entry)
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(StructuredFormatter())
+logging.root.handlers = [handler]
+logging.root.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 

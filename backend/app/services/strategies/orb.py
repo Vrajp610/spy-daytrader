@@ -107,6 +107,10 @@ class ORBStrategy(BaseStrategy):
         or_low = or_data["low"]
         range_width = or_data["range_width"]
 
+        atr = row.get("atr")
+        range_quality = (or_high - or_low) / atr if atr is not None and atr > 0 else 0
+        confidence = min(0.85, 0.5 + max(0, (vol_ratio - 1.5)) * 0.1 + range_quality * 0.15)
+
         # Breakout above opening range
         if close > or_high:
             stop = or_high - range_width * p["retracement_stop_pct"]
@@ -117,6 +121,7 @@ class ORBStrategy(BaseStrategy):
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width},
             )
@@ -131,6 +136,7 @@ class ORBStrategy(BaseStrategy):
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width},
             )

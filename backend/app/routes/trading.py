@@ -47,9 +47,37 @@ async def set_mode(update: TradingModeUpdate):
 
 @router.get("/trades")
 async def get_trades(limit: int = 50):
-    trades = trading_engine.paper_engine.closed_trades[-limit:]
-    trades.reverse()
-    return {"trades": trades, "total": len(trading_engine.paper_engine.closed_trades)}
+    from app.database import async_session
+    from app.models import Trade as TradeModel
+    from app.schemas import TradeOut
+    from sqlalchemy import select, func
+
+    async with async_session() as db:
+        # Count total
+        count_stmt = select(func.count()).select_from(TradeModel).where(TradeModel.status == "CLOSED")
+        total_result = await db.execute(count_stmt)
+        total = total_result.scalar() or 0
+
+        # Fetch recent trades
+        stmt = (
+            select(TradeModel)
+            .where(TradeModel.status == "CLOSED")
+            .order_by(TradeModel.exit_time.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        trades = result.scalars().all()
+
+    # Fall back to in-memory if DB is empty (backward compat during migration)
+    if total == 0 and trading_engine.paper_engine.closed_trades:
+        mem_trades = trading_engine.paper_engine.closed_trades[-limit:]
+        mem_trades_copy = list(reversed(mem_trades))
+        return {"trades": mem_trades_copy, "total": len(trading_engine.paper_engine.closed_trades)}
+
+    return {
+        "trades": [TradeOut.model_validate(t) for t in trades],
+        "total": total,
+    }
 
 
 @router.get("/position")

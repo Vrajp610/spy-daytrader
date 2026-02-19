@@ -63,12 +63,14 @@ class VWAPReversionStrategy(BaseStrategy):
         if vwap_dev <= -p["vwap_deviation_pct"] and rsi <= p["rsi_threshold"] and vol_ratio >= p["volume_surge_ratio"]:
             stop = close - p["atr_stop_mult"] * atr
             target = close + p["atr_target_mult"] * atr
+            confidence = min(0.9, 0.5 + abs(vwap_dev) * 50 + max(0, (30 - rsi)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.LONG,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"vwap_dev": vwap_dev, "rsi": rsi},
             )
@@ -77,12 +79,14 @@ class VWAPReversionStrategy(BaseStrategy):
         if vwap_dev >= p["vwap_deviation_pct"] and rsi >= p["rsi_short_threshold"] and vol_ratio >= p["volume_surge_ratio"]:
             stop = close + p["atr_stop_mult"] * atr
             target = close - p["atr_target_mult"] * atr
+            confidence = min(0.9, 0.5 + abs(vwap_dev) * 50 + max(0, (rsi - 65)) * 0.005)
             return TradeSignal(
                 strategy=self.name,
                 direction=Direction.SHORT,
                 entry_price=close,
                 stop_loss=stop,
                 take_profit=target,
+                confidence=confidence,
                 timestamp=current_time,
                 metadata={"vwap_dev": vwap_dev, "rsi": rsi},
             )
@@ -125,10 +129,10 @@ class VWAPReversionStrategy(BaseStrategy):
         if not is_long and close <= trade.take_profit:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
 
-        # VWAP reversion target (mean reversion complete)
-        if is_long and close >= vwap:
+        # VWAP reversion target (mean reversion complete, only if profitable)
+        if is_long and close >= vwap and close > trade.entry_price:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=close, timestamp=current_time)
-        if not is_long and close <= vwap:
+        if not is_long and close <= vwap and close < trade.entry_price:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=close, timestamp=current_time)
 
         # Trailing stop

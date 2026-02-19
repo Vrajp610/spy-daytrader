@@ -66,11 +66,29 @@ class RiskManager:
         kelly_adjusted = max(0.002, min(kelly * self._kelly_fraction, self.max_risk_per_trade))
         return kelly_adjusted
 
+    def _time_of_day_scalar(self) -> float:
+        """Scale position size based on time of day."""
+        from datetime import time as dt_time
+        now = datetime.now(ET).time()
+        if now < dt_time(9, 45):
+            return 0.5  # Opening volatility
+        elif now < dt_time(11, 30):
+            return 1.0  # Best setups
+        elif now < dt_time(13, 30):
+            return 0.6  # Lunch chop
+        elif now < dt_time(15, 30):
+            return 0.8  # Afternoon
+        else:
+            return 0.5  # EOD volatility
+
     def calculate_position_size(
         self, signal: TradeSignal, capital: float
     ) -> int:
         """Calculate position size using adaptive Kelly Criterion."""
         risk_fraction = self._kelly_risk_fraction()
+        # Scale risk by signal confidence (min 30% of normal size)
+        risk_fraction *= max(0.3, min(signal.confidence, 1.0))
+        risk_fraction *= self._time_of_day_scalar()
         risk_amount = capital * risk_fraction
         stop_distance = abs(signal.entry_price - signal.stop_loss)
         if stop_distance <= 0:
