@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.models import StrategyConfig
+from app.database import get_db, async_session
+from app.models import StrategyConfig, TradingConfig
 from app.config import settings
 from app.schemas import (
     StrategyConfigOut, StrategyConfigUpdate,
@@ -79,7 +79,7 @@ async def update_strategy_config(
 
 @router.get("/trading", response_model=TradingSettingsOut)
 async def get_trading_settings():
-    """Get current trading configuration."""
+    """Get current trading configuration from database."""
     return TradingSettingsOut(
         initial_capital=settings.initial_capital,
         max_risk_per_trade=settings.max_risk_per_trade,
@@ -94,12 +94,11 @@ async def get_trading_settings():
 
 @router.put("/trading", response_model=TradingSettingsOut)
 async def update_trading_settings(update: TradingSettingsUpdate):
-    """Update trading configuration. Changes take effect immediately."""
+    """Update trading configuration. Persists to database and takes effect immediately."""
     if update.initial_capital is not None:
         if update.initial_capital < 100:
             raise HTTPException(400, "Initial capital must be >= $100")
         settings.initial_capital = update.initial_capital
-        # Update paper engine if not running
         if not trading_engine.running:
             trading_engine.paper_engine.capital = update.initial_capital
             trading_engine.paper_engine.initial_capital = update.initial_capital
@@ -147,4 +146,52 @@ async def update_trading_settings(update: TradingSettingsUpdate):
         settings.cooldown_minutes = update.cooldown_minutes
         trading_engine.risk_manager.cooldown_minutes = update.cooldown_minutes
 
+    # Persist to database
+    async with async_session() as db:
+        stmt = select(TradingConfig).where(TradingConfig.id == 1)
+        result = await db.execute(stmt)
+        config = result.scalar_one_or_none()
+
+        if config is None:
+            config = TradingConfig(id=1)
+            db.add(config)
+
+        config.initial_capital = settings.initial_capital
+        config.max_risk_per_trade = settings.max_risk_per_trade
+        config.daily_loss_limit = settings.daily_loss_limit
+        config.max_drawdown = settings.max_drawdown
+        config.max_position_pct = settings.max_position_pct
+        config.max_trades_per_day = settings.max_trades_per_day
+        config.cooldown_after_consecutive_losses = settings.cooldown_after_consecutive_losses
+        config.cooldown_minutes = settings.cooldown_minutes
+
+        await db.commit()
+
     return await get_trading_settings()
+
+
+async def load_trading_config_from_db():
+    """Load persisted trading config from database on startup."""
+    try:
+        async with async_session() as db:
+            stmt = select(TradingConfig).where(TradingConfig.id == 1)
+            result = await db.execute(stmt)
+            config = result.scalar_one_or_none()
+
+            if config is None:
+                return  # No saved config, use defaults
+
+            settings.initial_capital = config.initial_capital
+            settings.max_risk_per_trade = config.max_risk_per_trade
+            settings.daily_loss_limit = config.daily_loss_limit
+            settings.max_drawdown = config.max_drawdown
+            settings.max_position_pct = config.max_position_pct
+            settings.max_trades_per_day = config.max_trades_per_day
+            settings.cooldown_after_consecutive_losses = config.cooldown_after_consecutive_losses
+            settings.cooldown_minutes = config.cooldown_minutes
+
+            import logging
+            logging.getLogger(__name__).info("Loaded trading config from database")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Could not load trading config from DB: {e}")

@@ -116,3 +116,19 @@ class StrategyRanking(Base):
     total_backtest_trades = Column(Integer, default=0)
     backtest_count = Column(Integer, default=0)
     computed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class TradingConfig(Base):
+    """Single-row table persisting trading settings across restarts."""
+    __tablename__ = "trading_config"
+
+    id = Column(Integer, primary_key=True, default=1)
+    initial_capital = Column(Float, default=25000.0)
+    max_risk_per_trade = Column(Float, default=0.015)
+    daily_loss_limit = Column(Float, default=0.02)
+    max_drawdown = Column(Float, default=0.16)
+    max_position_pct = Column(Float, default=0.30)
+    max_trades_per_day = Column(Integer, default=10)
+    cooldown_after_consecutive_losses = Column(Integer, default=3)
+    cooldown_minutes = Column(Integer, default=15)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

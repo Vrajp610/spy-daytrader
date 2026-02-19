@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Load persisted trading settings from DB
+    from app.routes.settings import load_trading_config_from_db
+    await load_trading_config_from_db()
+
     from app.services.auto_backtester import auto_backtester
     from app.services.trading_engine import trading_engine
 
