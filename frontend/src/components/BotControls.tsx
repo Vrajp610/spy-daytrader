@@ -49,21 +49,19 @@ export default function BotControls() {
 
   return (
     <div className={`card p-4 ${running ? 'accent-left-green' : 'accent-left-red'}`}>
-      <div className="card-header">
+      <div className="card-header mb-3">
         <h2 className="card-title">Bot Controls</h2>
-        <div className="flex items-center gap-2">
-          {running ? (
-            <span className="badge badge-active animate-glow-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-profit" />
-              Running
-            </span>
-          ) : (
-            <span className="badge badge-live">
-              <span className="w-1.5 h-1.5 rounded-full bg-loss" />
-              Stopped
-            </span>
-          )}
-        </div>
+        {running ? (
+          <span className="badge badge-active animate-glow-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-profit" />
+            Running
+          </span>
+        ) : (
+          <span className="badge badge-live">
+            <span className="w-1.5 h-1.5 rounded-full bg-loss" />
+            Stopped
+          </span>
+        )}
       </div>
 
       <div className="flex gap-2 mb-3">
@@ -83,31 +81,29 @@ export default function BotControls() {
         </button>
       </div>
 
-      <div className="space-y-2 text-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-muted text-xs">Mode</span>
-            <button
-              onClick={handleModeToggle}
-              className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}
-            >
-              {mode.toUpperCase()}
-            </button>
-            <span className="badge badge-active text-xxs">OPTIONS</span>
-          </div>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted text-xs">Regime</span>
-          <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200 truncate max-w-[10rem]" title={regime}>
-            {regime.replace('_', ' ')}
-          </span>
+      <div className="flex items-center justify-between grid-line pb-2">
+        <span className="label">Mode</span>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleModeToggle}
+            className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}
+          >
+            {mode.toUpperCase()}
+          </button>
+          <span className="badge badge-active text-xxs">OPTIONS</span>
         </div>
       </div>
 
-      {/* Regime -> Options mapping */}
+      <div className="flex items-center justify-between py-2">
+        <span className="label">Regime</span>
+        <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200" title={regime}>
+          {regime.replace(/_/g, ' ')}
+        </span>
+      </div>
+
       {running && (
-        <div className="mt-3 pt-2 border-t border-terminal-600/30">
-          <span className="text-muted text-xxs block mb-1">Regime Strategy</span>
+        <div className="pt-2 border-t border-terminal-600/30">
+          <span className="label block mb-1">Strategy</span>
           <span className="text-xxs font-mono text-terminal-200">
             {regime === 'TRENDING_UP' && 'Put Credit Spread / Call Debit Spread'}
             {regime === 'TRENDING_DOWN' && 'Call Credit Spread / Put Debit Spread'}
