@@ -1,7 +1,8 @@
-"""EMA Crossover + RSI Filter strategy.
+"""Micro Pullback strategy.
 
-Entry (LONG): 9 EMA crosses above 21 EMA on 5-min chart + RSI 40-70 + MACD positive + ADX > 20 + above VWAP
-Exit: 2.0x ATR target | 1.5x ATR stop | reverse EMA cross | trailing stop | EOD
+Entry: ADX > 30 (strong trend) + small pullback touching EMA9 → continuation trade.
+Regime: Trending
+Exit: 2.0x ATR target | 1.0x ATR stop | trailing 0.75x ATR | EOD
 """
 
 from __future__ import annotations
@@ -14,21 +15,18 @@ from app.services.strategies.base import (
 )
 
 
-class EMACrossoverStrategy(BaseStrategy):
-    name = "ema_crossover"
+class MicroPullbackStrategy(BaseStrategy):
+    name = "micro_pullback"
 
     def default_params(self) -> dict:
         return {
+            "adx_min": 30,
+            "pullback_touch_pct": 0.001,
             "ema_fast": 9,
             "ema_slow": 21,
-            "rsi_long_min": 40,
-            "rsi_long_max": 70,
-            "rsi_short_min": 30,
-            "rsi_short_max": 60,
-            "adx_min": 20,
             "atr_target_mult": 2.0,
-            "atr_stop_mult": 1.5,
-            "atr_trailing_mult": 1.0,
+            "atr_stop_mult": 1.0,
+            "atr_trailing_mult": 0.75,
             "eod_exit_time": "15:55",
         }
 
@@ -40,64 +38,62 @@ class EMACrossoverStrategy(BaseStrategy):
 
         p = self.params
         row = df.iloc[idx]
-        prev = df.iloc[idx - 1]
-
         t = current_time.time() if isinstance(current_time, datetime) else current_time
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
         if t < time(9, 45) or t >= eod:
             return None
 
         close = row["close"]
+        low = row["low"]
+        high = row["high"]
         ema9 = row.get("ema9")
         ema21 = row.get("ema21")
-        prev_ema9 = prev.get("ema9")
-        prev_ema21 = prev.get("ema21")
-        rsi = row.get("rsi")
-        macd_hist = row.get("macd_hist")
         adx = row.get("adx")
-        vwap = row.get("vwap")
         atr = row.get("atr")
+        rsi = row.get("rsi")
 
-        # Validate indicators exist
-        for val in [ema9, ema21, prev_ema9, prev_ema21, rsi, macd_hist, adx, vwap, atr]:
+        for val in [ema9, ema21, adx, atr, rsi]:
             if val is None or (isinstance(val, float) and pd.isna(val)):
                 return None
 
-        # LONG: bullish EMA crossover
-        if prev_ema9 <= prev_ema21 and ema9 > ema21:
-            if (p["rsi_long_min"] <= rsi <= p["rsi_long_max"]
-                    and macd_hist > 0
-                    and adx > p["adx_min"]
-                    and close > vwap):
-                stop = close - p["atr_stop_mult"] * atr
-                target = close + p["atr_target_mult"] * atr
-                return TradeSignal(
-                    strategy=self.name,
-                    direction=Direction.LONG,
-                    entry_price=close,
-                    stop_loss=stop,
-                    take_profit=target,
-                    timestamp=current_time,
-                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
-                )
+        if adx < p["adx_min"]:
+            return None
 
-        # SHORT: bearish EMA crossover
-        if prev_ema9 >= prev_ema21 and ema9 < ema21:
-            if (p["rsi_short_min"] <= rsi <= p["rsi_short_max"]
-                    and macd_hist < 0
-                    and adx > p["adx_min"]
-                    and close < vwap):
-                stop = close + p["atr_stop_mult"] * atr
-                target = close - p["atr_target_mult"] * atr
-                return TradeSignal(
-                    strategy=self.name,
-                    direction=Direction.SHORT,
-                    entry_price=close,
-                    stop_loss=stop,
-                    take_profit=target,
-                    timestamp=current_time,
-                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
-                )
+        touch_dist = p["pullback_touch_pct"] * close
+
+        # Uptrend: EMA9 > EMA21, price pulls back to touch EMA9, then closes above
+        if ema9 > ema21 and close > ema9:
+            # Bar's low touched or came within touch_dist of EMA9
+            if low <= ema9 + touch_dist:
+                # RSI not overbought (still has room)
+                if rsi is not None and rsi < 70:
+                    stop = close - p["atr_stop_mult"] * atr
+                    target = close + p["atr_target_mult"] * atr
+                    return TradeSignal(
+                        strategy=self.name,
+                        direction=Direction.LONG,
+                        entry_price=close,
+                        stop_loss=stop,
+                        take_profit=target,
+                        timestamp=current_time,
+                        metadata={"adx": adx, "ema9": ema9, "pullback": "up"},
+                    )
+
+        # Downtrend: EMA9 < EMA21, price pulls back up to touch EMA9, then closes below
+        if ema9 < ema21 and close < ema9:
+            if high >= ema9 - touch_dist:
+                if rsi is not None and rsi > 30:
+                    stop = close + p["atr_stop_mult"] * atr
+                    target = close - p["atr_target_mult"] * atr
+                    return TradeSignal(
+                        strategy=self.name,
+                        direction=Direction.SHORT,
+                        entry_price=close,
+                        stop_loss=stop,
+                        take_profit=target,
+                        timestamp=current_time,
+                        metadata={"adx": adx, "ema9": ema9, "pullback": "down"},
+                    )
 
         return None
 
@@ -113,7 +109,6 @@ class EMACrossoverStrategy(BaseStrategy):
     ) -> Optional[ExitSignal]:
         p = self.params
         row = df.iloc[idx]
-        prev = df.iloc[idx - 1] if idx > 0 else row
         close = row["close"]
         atr = row.get("atr", 0)
 
@@ -124,29 +119,16 @@ class EMACrossoverStrategy(BaseStrategy):
 
         is_long = trade.direction == Direction.LONG
 
-        # Stop loss
         if is_long and close <= trade.stop_loss:
             return ExitSignal(reason=ExitReason.STOP_LOSS, exit_price=trade.stop_loss, timestamp=current_time)
         if not is_long and close >= trade.stop_loss:
             return ExitSignal(reason=ExitReason.STOP_LOSS, exit_price=trade.stop_loss, timestamp=current_time)
 
-        # Take profit
         if is_long and close >= trade.take_profit:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
         if not is_long and close <= trade.take_profit:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
 
-        # Reverse EMA cross
-        ema9 = row.get("ema9", 0)
-        ema21 = row.get("ema21", 0)
-        prev_ema9 = prev.get("ema9", 0)
-        prev_ema21 = prev.get("ema21", 0)
-        if is_long and prev_ema9 >= prev_ema21 and ema9 < ema21:
-            return ExitSignal(reason=ExitReason.REVERSE_SIGNAL, exit_price=close, timestamp=current_time)
-        if not is_long and prev_ema9 <= prev_ema21 and ema9 > ema21:
-            return ExitSignal(reason=ExitReason.REVERSE_SIGNAL, exit_price=close, timestamp=current_time)
-
-        # Trailing stop
         trailing_dist = p["atr_trailing_mult"] * atr
         if is_long:
             trailing_stop = highest_since_entry - trailing_dist

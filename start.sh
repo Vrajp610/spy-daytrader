@@ -51,9 +51,24 @@ fi
 
 # ── Check Node.js ────────────────────────────────────────────────────────
 echo -e "${CYAN}[2/5] Checking Node.js...${NC}"
+
+# Source nvm if available (common on macOS/Linux)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+# Also check fnm
+if command -v fnm &>/dev/null; then
+    eval "$(fnm env --use-on-cd)" 2>/dev/null
+fi
+# Check for locally installed node
+for nd in "$HOME/.local/node-"*/bin; do
+    [ -x "$nd/node" ] && export PATH="$nd:$PATH" && break
+done
+
 if command -v node &>/dev/null; then
     NODE_VERSION=$(node -v)
     echo -e "  ${GREEN}Found node ($NODE_VERSION)${NC}"
+elif [ -x "$FRONTEND_DIR/node_modules/.bin/vite" ]; then
+    echo -e "  ${YELLOW}Node not in PATH but vite found locally${NC}"
 else
     echo -e "  ${RED}Node.js is required. Install from https://nodejs.org${NC}"
     exit 1
@@ -112,7 +127,12 @@ cd "$FRONTEND_DIR"
 
 if [ ! -d "node_modules" ]; then
     echo -e "  Installing frontend dependencies..."
-    npm install --silent
+    if command -v npm &>/dev/null; then
+        npm install --silent
+    else
+        echo -e "  ${RED}npm not found - install Node.js from https://nodejs.org${NC}"
+        exit 1
+    fi
 else
     echo -e "  ${GREEN}Dependencies already installed${NC}"
 fi
@@ -147,7 +167,11 @@ done
 # Start frontend
 cd "$FRONTEND_DIR"
 echo -e "  ${GREEN}Starting frontend on http://localhost:5173${NC}"
-npx vite --host &
+if command -v npx &>/dev/null; then
+    npx vite --host &
+else
+    ./node_modules/.bin/vite --host &
+fi
 FRONTEND_PID=$!
 
 echo ""
@@ -158,12 +182,12 @@ echo -e "${GREEN}║  Dashboard:  http://localhost:5173                        �
 echo -e "${GREEN}║  API:        http://localhost:8000/docs                   ║${NC}"
 echo -e "${GREEN}║  Mode:       PAPER TRADING (no real money)               ║${NC}"
 echo -e "${GREEN}║                                                          ║${NC}"
-echo -e "${GREEN}║  Strategies:                                             ║${NC}"
-echo -e "${GREEN}║    - VWAP Mean Reversion (range-bound/volatile)          ║${NC}"
-echo -e "${GREEN}║    - Opening Range Breakout (trending)                   ║${NC}"
-echo -e "${GREEN}║    - EMA Crossover + RSI (trending)                      ║${NC}"
-echo -e "${GREEN}║    - Volume Profile + Order Flow (range-bound/volatile)  ║${NC}"
-echo -e "${GREEN}║    - Multi-TF Momentum Confluence (trending)             ║${NC}"
+echo -e "${GREEN}║  12 Strategies (auto-backtested every 4h):               ║${NC}"
+echo -e "${GREEN}║    Trending:   ORB, EMA Crossover, MTF Momentum,         ║${NC}"
+echo -e "${GREEN}║                Micro Pullback, Momentum Scalper          ║${NC}"
+echo -e "${GREEN}║    Range:      VWAP Reversion, Volume Flow,              ║${NC}"
+echo -e "${GREEN}║                RSI Divergence, BB Squeeze, Dbl Bot/Top   ║${NC}"
+echo -e "${GREEN}║    Volatile:   MACD Reversal, Gap Fill                   ║${NC}"
 echo -e "${GREEN}║                                                          ║${NC}"
 echo -e "${GREEN}║  Press Ctrl+C to stop                                    ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"

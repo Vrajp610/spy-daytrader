@@ -22,6 +22,18 @@ class ExitReason(str, Enum):
     EOD = "eod"
     REVERSE_SIGNAL = "reverse_signal"
     FALSE_BREAKOUT = "false_breakout"
+    SCALE_OUT_1 = "scale_out_1"
+    SCALE_OUT_2 = "scale_out_2"
+    ADAPTIVE_TRAILING = "adaptive_trailing"
+
+
+@dataclass
+class ScaleLevel:
+    """Defines a scale-out level for partial position exits."""
+    pct_to_close: float              # fraction of original qty to close (e.g. 0.50)
+    atr_profit_multiple: float       # trigger when profit >= this * ATR
+    move_stop_to_breakeven: bool     # move effective stop to entry after this scale
+    new_trailing_atr_mult: Optional[float] = None  # tighten trailing to this * ATR
 
 
 @dataclass
@@ -42,6 +54,7 @@ class ExitSignal:
     reason: ExitReason
     exit_price: float
     timestamp: Optional[datetime] = None
+    quantity: Optional[int] = None  # None = close entire position
 
 
 class BaseStrategy(ABC):
@@ -58,7 +71,7 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def generate_signal(
-        self, df: pd.DataFrame, idx: int, current_time: datetime
+        self, df: pd.DataFrame, idx: int, current_time: datetime, **kwargs
     ) -> Optional[TradeSignal]:
         """Check if entry conditions are met at bar index `idx`."""
         ...

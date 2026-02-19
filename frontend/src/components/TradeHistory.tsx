@@ -85,7 +85,10 @@ export default function TradeHistory({ trades, total }: Props) {
                 <td className={`px-3 py-2 font-mono font-medium ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   ${t.pnl.toFixed(2)}
                 </td>
-                <td className="px-3 py-2 text-xs text-gray-400">{t.exit_reason}</td>
+                <td className="px-3 py-2 text-xs text-gray-400">
+                  {t.exit_reason}
+                  {t.is_partial && <span className="ml-1 text-yellow-400">(partial)</span>}
+                </td>
               </tr>
             ))}
           </tbody>

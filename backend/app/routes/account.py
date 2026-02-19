@@ -3,7 +3,6 @@
 from __future__ import annotations
 from fastapi import APIRouter
 from app.services.trading_engine import trading_engine
-from app.services.schwab_client import schwab_client
 from app.schemas import AccountInfo, RiskMetrics
 
 router = APIRouter(prefix="/api/account", tags=["account"])

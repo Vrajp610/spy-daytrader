@@ -79,7 +79,7 @@ class ORBStrategy(BaseStrategy):
         return result
 
     def generate_signal(
-        self, df: pd.DataFrame, idx: int, current_time: datetime
+        self, df: pd.DataFrame, idx: int, current_time: datetime, **kwargs
     ) -> Optional[TradeSignal]:
         if idx < 20:
             return None
@@ -172,19 +172,23 @@ class ORBStrategy(BaseStrategy):
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
 
         # False breakout detection: price closes back inside range within N bars
+        # Only check after we've been in the trade for at least 2 bars
         or_data = trade.metadata
         if or_data and entry_time:
             bars_since = 0
             for i in range(idx, max(0, idx - p["false_breakout_bars"] * 2), -1):
                 bar_t = df.index[i]
-                if hasattr(bar_t, 'timestamp'):
+                try:
                     if bar_t <= entry_time:
                         break
+                except TypeError:
+                    break
                 bars_since += 1
                 if bars_since > p["false_breakout_bars"]:
                     break
 
-            if bars_since <= p["false_breakout_bars"]:
+            # Must be at least 2 bars in, but not more than false_breakout_bars
+            if 2 <= bars_since <= p["false_breakout_bars"]:
                 if is_long and close < or_data.get("or_high", float("inf")):
                     return ExitSignal(reason=ExitReason.FALSE_BREAKOUT, exit_price=close, timestamp=current_time)
                 if not is_long and close > or_data.get("or_low", 0):

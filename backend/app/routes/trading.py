@@ -57,6 +57,13 @@ async def get_position():
     pos = trading_engine.paper_engine.position
     if pos is None:
         return {"position": None}
+
+    # Use last known market price for unrealized P&L
+    current_price = pos.entry_price
+    df = trading_engine._df_1min
+    if df is not None and not df.empty:
+        current_price = float(df.iloc[-1]["close"])
+
     return {
         "position": {
             "symbol": pos.symbol,
@@ -67,5 +74,9 @@ async def get_position():
             "stop_loss": pos.stop_loss,
             "take_profit": pos.take_profit,
             "strategy": pos.strategy,
+            "unrealized_pnl": round(pos.unrealized_pnl(current_price), 2),
+            "original_quantity": pos.original_quantity,
+            "scales_completed": list(pos.scales_completed),
+            "effective_stop": pos.effective_stop,
         }
     }

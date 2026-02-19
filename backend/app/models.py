@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, Integer, Float, String, DateTime, Boolean, Text, Date, JSON,
 )
@@ -31,7 +31,7 @@ class Trade(Base):
     exit_reason = Column(String, nullable=True)
     is_paper = Column(Boolean, default=True, nullable=False)
     status = Column(String, default="OPEN", nullable=False)  # OPEN / CLOSED
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class DailyPerformance(Base):
@@ -52,7 +52,7 @@ class AccountSnapshot(Base):
     __tablename__ = "account_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     equity = Column(Float, nullable=False)
     cash = Column(Float, nullable=False)
     buying_power = Column(Float, nullable=False)
@@ -64,7 +64,7 @@ class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     symbol = Column(String, default="SPY")
     start_date = Column(String, nullable=False)
     end_date = Column(String, nullable=False)
@@ -90,4 +90,20 @@ class StrategyConfig(Base):
     name = Column(String, unique=True, nullable=False)
     enabled = Column(Boolean, default=True)
     params = Column(JSON, default=dict)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class StrategyRanking(Base):
+    __tablename__ = "strategy_rankings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_name = Column(String, nullable=False, unique=True)
+    avg_sharpe_ratio = Column(Float, default=0.0)
+    avg_profit_factor = Column(Float, default=0.0)
+    avg_win_rate = Column(Float, default=0.0)
+    avg_return_pct = Column(Float, default=0.0)
+    avg_max_drawdown_pct = Column(Float, default=0.0)
+    composite_score = Column(Float, default=0.0)
+    total_backtest_trades = Column(Integer, default=0)
+    backtest_count = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

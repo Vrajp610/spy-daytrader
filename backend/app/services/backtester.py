@@ -8,13 +8,21 @@ import numpy as np
 import logging
 
 from app.services.data_manager import DataManager
-from app.services.strategies.base import BaseStrategy, TradeSignal, Direction
+from app.services.exit_manager import ExitManager, PositionState
+from app.services.strategies.base import BaseStrategy, TradeSignal, Direction, ExitReason
 from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
 from app.services.strategies.orb import ORBStrategy
 from app.services.strategies.ema_crossover import EMACrossoverStrategy
 from app.services.strategies.volume_flow import VolumeFlowStrategy
 from app.services.strategies.mtf_momentum import MTFMomentumStrategy
+from app.services.strategies.rsi_divergence import RSIDivergenceStrategy
+from app.services.strategies.bb_squeeze import BBSqueezeStrategy
+from app.services.strategies.macd_reversal import MACDReversalStrategy
+from app.services.strategies.momentum_scalper import MomentumScalperStrategy
+from app.services.strategies.gap_fill import GapFillStrategy
+from app.services.strategies.micro_pullback import MicroPullbackStrategy
+from app.services.strategies.double_bottom_top import DoubleBottomTopStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +32,21 @@ STRATEGY_MAP = {
     "ema_crossover": EMACrossoverStrategy,
     "volume_flow": VolumeFlowStrategy,
     "mtf_momentum": MTFMomentumStrategy,
+    "rsi_divergence": RSIDivergenceStrategy,
+    "bb_squeeze": BBSqueezeStrategy,
+    "macd_reversal": MACDReversalStrategy,
+    "momentum_scalper": MomentumScalperStrategy,
+    "gap_fill": GapFillStrategy,
+    "micro_pullback": MicroPullbackStrategy,
+    "double_bottom_top": DoubleBottomTopStrategy,
 }
 
 # Regime -> preferred strategies
 REGIME_STRATEGY_MAP = {
-    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum"],
-    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum"],
-    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow"],
-    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow"],
+    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
+    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
+    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze", "double_bottom_top"],
+    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow", "macd_reversal", "gap_fill"],
 }
 
 
@@ -81,7 +96,7 @@ class BacktestResult:
         gross_profit = sum(t["pnl"] for t in self.trades if t["pnl"] > 0)
         gross_loss = abs(sum(t["pnl"] for t in self.trades if t["pnl"] < 0))
         if gross_loss == 0:
-            return float("inf") if gross_profit > 0 else 0.0
+            return 99.99 if gross_profit > 0 else 0.0
         return gross_profit / gross_loss
 
     @property
@@ -136,12 +151,14 @@ class Backtester:
         use_regime_filter: bool = True,
         max_trades_per_day: int = 10,
         daily_loss_limit: float = 0.02,
+        max_drawdown: float = 0.16,
     ):
         self.initial_capital = initial_capital
         self.max_risk_per_trade = max_risk_per_trade
         self.use_regime_filter = use_regime_filter
         self.max_trades_per_day = max_trades_per_day
         self.daily_loss_limit = daily_loss_limit
+        self.max_drawdown = max_drawdown
 
         self.strategy_instances: dict[str, BaseStrategy] = {}
         for name in strategies:
@@ -150,6 +167,7 @@ class Backtester:
                 self.strategy_instances[name] = cls()
 
         self.regime_detector = RegimeDetector()
+        self.exit_manager = ExitManager()
 
     def run(
         self,
@@ -194,6 +212,7 @@ class Backtester:
         daily_trades = 0
         daily_pnl = 0.0
         current_date = None
+        regime = MarketRegime.RANGE_BOUND
 
         for idx in range(30, len(df)):
             bar = df.iloc[idx]
@@ -206,6 +225,30 @@ class Backtester:
 
             # Reset daily counters
             if bar_date != current_date:
+                # Force-close any open position from previous day at previous close
+                if open_trade is not None and current_date is not None:
+                    prev_close = df.iloc[idx - 1]["close"] if idx > 0 else close
+                    remaining_qty = open_trade["remaining_quantity"]
+                    pnl = self._calc_pnl(
+                        open_trade["signal"], prev_close, remaining_qty
+                    )
+                    capital += pnl
+                    daily_pnl += pnl
+                    peak_capital = max(peak_capital, capital)
+                    result.trades.append({
+                        "strategy": open_trade["strategy"],
+                        "direction": open_trade["signal"].direction.value,
+                        "entry_price": open_trade["signal"].entry_price,
+                        "exit_price": float(prev_close),
+                        "entry_time": str(open_trade["entry_time"]),
+                        "exit_time": str(df.index[idx - 1]) if idx > 0 else str(bar_time),
+                        "quantity": remaining_qty,
+                        "pnl": round(pnl, 2),
+                        "exit_reason": "eod",
+                        "regime": regime.value if regime else "unknown",
+                    })
+                    open_trade = None
+
                 current_date = bar_date
                 daily_trades = 0
                 daily_pnl = 0.0
@@ -234,39 +277,117 @@ class Backtester:
 
                 strategy = self.strategy_instances.get(open_trade["strategy"])
                 if strategy:
-                    exit_signal = strategy.should_exit(
+                    # Get ATR
+                    atr = float(bar.get("atr", 0)) if "atr" in df.columns else 0.0
+
+                    # Strategy's native exit
+                    strategy_exit = strategy.should_exit(
                         df, idx, open_trade["signal"],
                         open_trade["entry_time"], bar_time,
                         highest_since_entry, lowest_since_entry,
                     )
-                    if exit_signal:
-                        pnl = self._calc_pnl(
-                            open_trade["signal"], exit_signal.exit_price,
-                            open_trade["quantity"]
-                        )
-                        capital += pnl
-                        daily_pnl += pnl
-                        peak_capital = max(peak_capital, capital)
 
-                        result.trades.append({
-                            "strategy": open_trade["strategy"],
-                            "direction": open_trade["signal"].direction.value,
-                            "entry_price": open_trade["signal"].entry_price,
-                            "exit_price": exit_signal.exit_price,
-                            "entry_time": str(open_trade["entry_time"]),
-                            "exit_time": str(bar_time),
-                            "quantity": open_trade["quantity"],
-                            "pnl": round(pnl, 2),
-                            "exit_reason": exit_signal.reason.value,
-                            "regime": regime.value,
-                        })
-                        open_trade = None
+                    # Build PositionState for ExitManager
+                    state = PositionState(
+                        direction=open_trade["signal"].direction.value,
+                        entry_price=open_trade["signal"].entry_price,
+                        quantity=open_trade["remaining_quantity"],
+                        original_quantity=open_trade["original_quantity"],
+                        scales_completed=list(open_trade["scales_completed"]),
+                        effective_stop=open_trade["effective_stop"],
+                        trailing_atr_mult=open_trade["trailing_atr_mult"],
+                        highest_since_entry=highest_since_entry,
+                        lowest_since_entry=lowest_since_entry,
+                    )
+
+                    # Update position tracking each bar
+                    if atr > 0:
+                        updates = self.exit_manager.compute_position_updates(
+                            state, float(close), atr
+                        )
+                        if "effective_stop" in updates:
+                            open_trade["effective_stop"] = updates["effective_stop"]
+                            state.effective_stop = updates["effective_stop"]
+                        if "trailing_atr_mult" in updates:
+                            open_trade["trailing_atr_mult"] = updates["trailing_atr_mult"]
+                            state.trailing_atr_mult = updates["trailing_atr_mult"]
+
+                    # Check exits via ExitManager
+                    exit_signal = self.exit_manager.check_exit(
+                        state, float(close), atr, strategy_exit
+                    )
+
+                    if exit_signal:
+                        if (exit_signal.quantity is not None
+                                and exit_signal.quantity < open_trade["remaining_quantity"]):
+                            # Partial close (scale-out)
+                            partial_qty = exit_signal.quantity
+                            pnl = self._calc_pnl(
+                                open_trade["signal"], exit_signal.exit_price, partial_qty
+                            )
+                            capital += pnl
+                            daily_pnl += pnl
+                            peak_capital = max(peak_capital, capital)
+
+                            result.trades.append({
+                                "strategy": open_trade["strategy"],
+                                "direction": open_trade["signal"].direction.value,
+                                "entry_price": open_trade["signal"].entry_price,
+                                "exit_price": exit_signal.exit_price,
+                                "entry_time": str(open_trade["entry_time"]),
+                                "exit_time": str(bar_time),
+                                "quantity": partial_qty,
+                                "pnl": round(pnl, 2),
+                                "exit_reason": exit_signal.reason.value,
+                                "regime": regime.value,
+                                "is_partial": True,
+                            })
+
+                            open_trade["remaining_quantity"] -= partial_qty
+
+                            # Apply post-scale updates
+                            scale_num = (
+                                1 if exit_signal.reason == ExitReason.SCALE_OUT_1 else 2
+                            )
+                            post_updates = self.exit_manager.get_post_scale_updates(
+                                state, scale_num, atr
+                            )
+                            if "scales_completed" in post_updates:
+                                open_trade["scales_completed"] = post_updates["scales_completed"]
+                            if "effective_stop" in post_updates:
+                                open_trade["effective_stop"] = post_updates["effective_stop"]
+                            if "trailing_atr_mult" in post_updates:
+                                open_trade["trailing_atr_mult"] = post_updates["trailing_atr_mult"]
+                        else:
+                            # Full close
+                            remaining_qty = open_trade["remaining_quantity"]
+                            pnl = self._calc_pnl(
+                                open_trade["signal"], exit_signal.exit_price,
+                                remaining_qty
+                            )
+                            capital += pnl
+                            daily_pnl += pnl
+                            peak_capital = max(peak_capital, capital)
+
+                            result.trades.append({
+                                "strategy": open_trade["strategy"],
+                                "direction": open_trade["signal"].direction.value,
+                                "entry_price": open_trade["signal"].entry_price,
+                                "exit_price": exit_signal.exit_price,
+                                "entry_time": str(open_trade["entry_time"]),
+                                "exit_time": str(bar_time),
+                                "quantity": remaining_qty,
+                                "pnl": round(pnl, 2),
+                                "exit_reason": exit_signal.reason.value,
+                                "regime": regime.value,
+                            })
+                            open_trade = None
 
             # Record equity
             unrealized = 0
             if open_trade:
                 unrealized = self._calc_pnl(
-                    open_trade["signal"], close, open_trade["quantity"]
+                    open_trade["signal"], close, open_trade["remaining_quantity"]
                 )
             result.equity_curve.append({
                 "timestamp": str(bar_time),
@@ -274,14 +395,14 @@ class Backtester:
             })
 
             # Check daily limits
-            if daily_pnl <= -(self.daily_loss_limit * self.initial_capital):
+            if daily_pnl <= -(self.daily_loss_limit * capital):
                 continue
             if daily_trades >= self.max_trades_per_day:
                 continue
 
             # Circuit breaker
             drawdown = (peak_capital - capital) / peak_capital if peak_capital > 0 else 0
-            if drawdown >= 0.16:
+            if drawdown >= self.max_drawdown:
                 continue
 
             # Try to open new trade
@@ -337,6 +458,11 @@ class Backtester:
                             "strategy": strat_name,
                             "entry_time": bar_time,
                             "quantity": quantity,
+                            "remaining_quantity": quantity,
+                            "original_quantity": quantity,
+                            "scales_completed": [],
+                            "effective_stop": signal.stop_loss,
+                            "trailing_atr_mult": None,
                         }
                         highest_since_entry = bar["high"]
                         lowest_since_entry = bar["low"]
@@ -346,7 +472,8 @@ class Backtester:
         # Close any remaining open trade at last bar
         if open_trade and len(df) > 0:
             last_close = df.iloc[-1]["close"]
-            pnl = self._calc_pnl(open_trade["signal"], last_close, open_trade["quantity"])
+            remaining_qty = open_trade["remaining_quantity"]
+            pnl = self._calc_pnl(open_trade["signal"], last_close, remaining_qty)
             capital += pnl
             result.trades.append({
                 "strategy": open_trade["strategy"],
@@ -355,7 +482,7 @@ class Backtester:
                 "exit_price": last_close,
                 "entry_time": str(open_trade["entry_time"]),
                 "exit_time": str(df.index[-1]),
-                "quantity": open_trade["quantity"],
+                "quantity": remaining_qty,
                 "pnl": round(pnl, 2),
                 "exit_reason": "eod",
                 "regime": "unknown",

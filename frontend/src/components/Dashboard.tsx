@@ -8,6 +8,7 @@ import RiskMetricsCard from './RiskMetrics';
 import TradeHistory from './TradeHistory';
 import BacktestPanel from './BacktestPanel';
 import StrategyConfigPanel from './StrategyConfig';
+import StrategyLeaderboard from './StrategyLeaderboard';
 
 export default function Dashboard() {
   const { lastMessage, connected } = useWebSocket();
@@ -45,6 +46,9 @@ export default function Dashboard() {
 
         {/* Middle: Trade History */}
         <TradeHistory trades={trades} total={total} />
+
+        {/* Strategy Leaderboard */}
+        <StrategyLeaderboard />
 
         {/* Bottom: Backtesting + Strategy Config */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

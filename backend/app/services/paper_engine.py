@@ -5,7 +5,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
 import logging
-import random
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +26,7 @@ class PaperPosition:
         self.symbol = symbol
         self.direction = direction
         self.quantity = quantity
+        self.original_quantity = quantity
         self.entry_price = entry_price
         self.entry_time = entry_time
         self.stop_loss = stop_loss
@@ -34,6 +34,9 @@ class PaperPosition:
         self.strategy = strategy
         self.highest_since_entry = entry_price
         self.lowest_since_entry = entry_price
+        self.scales_completed: list[int] = []
+        self.effective_stop = stop_loss
+        self.trailing_atr_mult: Optional[float] = None
 
     def update_extremes(self, high: float, low: float):
         self.highest_since_entry = max(self.highest_since_entry, high)
@@ -130,6 +133,51 @@ class PaperEngine:
         self.position = None
         return trade
 
+    def reduce_position(
+        self, quantity: int, price: float, reason: str = "scale_out"
+    ) -> Optional[dict]:
+        """Close a partial quantity of the current position."""
+        if self.position is None:
+            return None
+        if quantity <= 0 or quantity >= self.position.quantity:
+            return None
+
+        is_sell = self.position.direction == "LONG"
+        fill_price = self._apply_slippage(price, not is_sell)
+
+        # P&L for just the partial quantity
+        if self.position.direction == "LONG":
+            pnl = (fill_price - self.position.entry_price) * quantity
+        else:
+            pnl = (self.position.entry_price - fill_price) * quantity
+
+        self.capital += pnl
+        self.peak_capital = max(self.peak_capital, self.capital)
+
+        trade = {
+            "symbol": self.position.symbol,
+            "direction": self.position.direction,
+            "quantity": quantity,
+            "entry_price": self.position.entry_price,
+            "exit_price": fill_price,
+            "entry_time": self.position.entry_time.isoformat(),
+            "exit_time": datetime.now(ET).isoformat(),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl / (self.position.entry_price * quantity) * 100, 2),
+            "exit_reason": reason,
+            "strategy": self.position.strategy,
+            "is_partial": True,
+        }
+        self.closed_trades.append(trade)
+
+        self.position.quantity -= quantity
+        logger.info(
+            f"Paper PARTIAL CLOSE {quantity} of {self.position.direction} "
+            f"{self.position.symbol} @ {fill_price:.2f} | P&L: ${pnl:.2f} | "
+            f"Remaining: {self.position.quantity} | Reason: {reason}"
+        )
+        return trade
+
     @property
     def equity(self) -> float:
         return self.capital
@@ -143,15 +191,30 @@ class PaperEngine:
     @property
     def daily_pnl(self) -> float:
         today = datetime.now(ET).date()
-        return sum(
-            t["pnl"] for t in self.closed_trades
-            if datetime.fromisoformat(t["exit_time"]).date() == today
-        )
+        # Only scan recent trades (reverse iterate, stop at first different day)
+        total = 0.0
+        for t in reversed(self.closed_trades):
+            try:
+                trade_date = datetime.fromisoformat(t["exit_time"]).date()
+            except (ValueError, KeyError):
+                continue
+            if trade_date == today:
+                total += t["pnl"]
+            elif trade_date < today:
+                break
+        return total
 
     @property
     def trades_today(self) -> int:
         today = datetime.now(ET).date()
-        return sum(
-            1 for t in self.closed_trades
-            if datetime.fromisoformat(t["exit_time"]).date() == today
-        )
+        count = 0
+        for t in reversed(self.closed_trades):
+            try:
+                trade_date = datetime.fromisoformat(t["exit_time"]).date()
+            except (ValueError, KeyError):
+                continue
+            if trade_date == today:
+                count += 1
+            elif trade_date < today:
+                break
+        return count

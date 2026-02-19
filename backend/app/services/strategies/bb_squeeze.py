@@ -1,11 +1,13 @@
-"""VWAP Mean Reversion strategy.
+"""Bollinger Band Squeeze strategy.
 
-Entry (LONG): Price >= 0.3% below VWAP + RSI(14) <= 30 + volume surge + 30 min after open
-Exit: VWAP reversion or 1.5x ATR target | 1.0x ATR stop | trailing 0.5x ATR | 45-min time stop | EOD 3:55 PM
+Entry: BB width contracts to bottom 20th percentile of recent history,
+       then expands with volume surge → breakout trade.
+Regime: Range-bound
+Exit: 2.0x ATR target | 1.0x ATR stop | trailing 0.75x ATR | EOD
 """
 
 from __future__ import annotations
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from typing import Optional
 import pandas as pd
 
@@ -14,53 +16,73 @@ from app.services.strategies.base import (
 )
 
 
-class VWAPReversionStrategy(BaseStrategy):
-    name = "vwap_reversion"
+class BBSqueezeStrategy(BaseStrategy):
+    name = "bb_squeeze"
 
     def default_params(self) -> dict:
         return {
-            "vwap_deviation_pct": 0.003,
-            "rsi_threshold": 30,
-            "rsi_short_threshold": 70,
+            "squeeze_percentile": 20,
+            "squeeze_lookback": 50,
+            "expansion_bars": 3,
             "volume_surge_ratio": 1.3,
-            "min_minutes_after_open": 30,
-            "atr_target_mult": 1.5,
+            "atr_target_mult": 2.0,
             "atr_stop_mult": 1.0,
-            "atr_trailing_mult": 0.5,
-            "time_stop_minutes": 45,
+            "atr_trailing_mult": 0.75,
             "eod_exit_time": "15:55",
         }
 
     def generate_signal(
         self, df: pd.DataFrame, idx: int, current_time: datetime, **kwargs
     ) -> Optional[TradeSignal]:
-        if idx < 30:
+        if idx < 60:
             return None
 
         p = self.params
         row = df.iloc[idx]
-
-        # Time filters
         t = current_time.time() if isinstance(current_time, datetime) else current_time
-        market_open = time(9, 30)
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
-        if t < time(10, 0) or t >= eod:
+        if t < time(9, 45) or t >= eod:
             return None
 
         close = row["close"]
-        vwap = row.get("vwap")
-        rsi = row.get("rsi")
+        bb_width = row.get("bb_width")
+        bb_upper = row.get("bb_upper")
+        bb_lower = row.get("bb_lower")
         atr = row.get("atr")
         vol_ratio = row.get("vol_ratio", 1.0)
 
-        if vwap is None or rsi is None or atr is None:
-            return None
-        if pd.isna(vwap) or pd.isna(rsi) or pd.isna(atr):
+        for val in [bb_width, bb_upper, bb_lower, atr]:
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return None
+
+        # Check for squeeze: recent BB width was in bottom percentile
+        lookback = min(p["squeeze_lookback"], idx)
+        bb_widths = df.iloc[idx - lookback:idx]["bb_width"].dropna()
+        if len(bb_widths) < 20:
             return None
 
-        # LONG: price well below VWAP + oversold RSI + volume surge
-        vwap_dev = (close - vwap) / vwap
-        if vwap_dev <= -p["vwap_deviation_pct"] and rsi <= p["rsi_threshold"] and vol_ratio >= p["volume_surge_ratio"]:
+        threshold = bb_widths.quantile(p["squeeze_percentile"] / 100)
+
+        # Was squeezed in last few bars, now expanding
+        recent_squeezed = False
+        for i in range(max(0, idx - p["expansion_bars"]), idx):
+            bw = df.iloc[i].get("bb_width")
+            if bw is not None and not pd.isna(bw) and bw <= threshold:
+                recent_squeezed = True
+                break
+
+        if not recent_squeezed:
+            return None
+
+        # Current width must be expanding (above threshold now)
+        if bb_width <= threshold:
+            return None
+
+        if pd.isna(vol_ratio) or vol_ratio < p["volume_surge_ratio"]:
+            return None
+
+        # Direction: breakout above upper BB → long, below lower → short
+        if close > bb_upper:
             stop = close - p["atr_stop_mult"] * atr
             target = close + p["atr_target_mult"] * atr
             return TradeSignal(
@@ -70,11 +92,10 @@ class VWAPReversionStrategy(BaseStrategy):
                 stop_loss=stop,
                 take_profit=target,
                 timestamp=current_time,
-                metadata={"vwap_dev": vwap_dev, "rsi": rsi},
+                metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
             )
 
-        # SHORT: price well above VWAP + overbought RSI + volume surge
-        if vwap_dev >= p["vwap_deviation_pct"] and rsi >= p["rsi_short_threshold"] and vol_ratio >= p["volume_surge_ratio"]:
+        if close < bb_lower:
             stop = close + p["atr_stop_mult"] * atr
             target = close - p["atr_target_mult"] * atr
             return TradeSignal(
@@ -84,7 +105,7 @@ class VWAPReversionStrategy(BaseStrategy):
                 stop_loss=stop,
                 take_profit=target,
                 timestamp=current_time,
-                metadata={"vwap_dev": vwap_dev, "rsi": rsi},
+                metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
             )
 
         return None
@@ -102,10 +123,8 @@ class VWAPReversionStrategy(BaseStrategy):
         p = self.params
         row = df.iloc[idx]
         close = row["close"]
-        vwap = row.get("vwap", close)
         atr = row.get("atr", 0)
 
-        # EOD exit
         t = current_time.time() if isinstance(current_time, datetime) else current_time
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
         if t >= eod:
@@ -113,25 +132,16 @@ class VWAPReversionStrategy(BaseStrategy):
 
         is_long = trade.direction == Direction.LONG
 
-        # Stop loss
         if is_long and close <= trade.stop_loss:
             return ExitSignal(reason=ExitReason.STOP_LOSS, exit_price=trade.stop_loss, timestamp=current_time)
         if not is_long and close >= trade.stop_loss:
             return ExitSignal(reason=ExitReason.STOP_LOSS, exit_price=trade.stop_loss, timestamp=current_time)
 
-        # Take profit
         if is_long and close >= trade.take_profit:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
         if not is_long and close <= trade.take_profit:
             return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=trade.take_profit, timestamp=current_time)
 
-        # VWAP reversion target (mean reversion complete)
-        if is_long and close >= vwap:
-            return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=close, timestamp=current_time)
-        if not is_long and close <= vwap:
-            return ExitSignal(reason=ExitReason.TAKE_PROFIT, exit_price=close, timestamp=current_time)
-
-        # Trailing stop
         trailing_dist = p["atr_trailing_mult"] * atr
         if is_long:
             trailing_stop = highest_since_entry - trailing_dist
@@ -141,9 +151,5 @@ class VWAPReversionStrategy(BaseStrategy):
             trailing_stop = lowest_since_entry + trailing_dist
             if trailing_stop < trade.stop_loss and close >= trailing_stop:
                 return ExitSignal(reason=ExitReason.TRAILING_STOP, exit_price=close, timestamp=current_time)
-
-        # Time stop
-        if entry_time and (current_time - entry_time).total_seconds() > p["time_stop_minutes"] * 60:
-            return ExitSignal(reason=ExitReason.TIME_STOP, exit_price=close, timestamp=current_time)
 
         return None

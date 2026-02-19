@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.config import settings
@@ -37,7 +37,6 @@ class SchwabClient:
             return
 
         try:
-            import schwab
             token_path = Path(settings.schwab_token_path)
             if token_path.exists():
                 self._client = schwab.auth.client_from_token_file(
@@ -68,7 +67,7 @@ class SchwabClient:
                     "bid": quote.get("bidPrice"),
                     "ask": quote.get("askPrice"),
                     "volume": quote.get("totalVolume"),
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
         except Exception as e:
             logger.error(f"Error getting quote: {e}")

@@ -24,6 +24,9 @@ export interface Position {
   take_profit: number;
   strategy: string;
   unrealized_pnl?: number;
+  original_quantity?: number;
+  effective_stop?: number;
+  scales_completed?: number[];
 }
 
 export interface Trade {
@@ -40,6 +43,7 @@ export interface Trade {
   pnl: number;
   pnl_pct?: number;
   exit_reason: string;
+  is_partial?: boolean;
 }
 
 export interface AccountInfo {
@@ -114,4 +118,46 @@ export interface DailyPerformance {
 export interface WSMessage {
   type: 'price_update' | 'trade_update' | 'status_update' | 'error' | 'pong';
   data: Record<string, unknown>;
+}
+
+// ── Leaderboard ──────────────────────────────────────────────────
+
+export interface StrategyRanking {
+  strategy_name: string;
+  avg_sharpe_ratio: number;
+  avg_profit_factor: number;
+  avg_win_rate: number;
+  avg_return_pct: number;
+  avg_max_drawdown_pct: number;
+  composite_score: number;
+  total_backtest_trades: number;
+  backtest_count: number;
+  computed_at: string | null;
+}
+
+export interface LeaderboardProgress {
+  status: string;
+  current_test: string;
+  completed: number;
+  total: number;
+  errors: number;
+  last_run: string | null;
+}
+
+export interface LeaderboardResponse {
+  rankings: StrategyRanking[];
+  progress: LeaderboardProgress;
+}
+
+export interface StrategyComparison {
+  strategy: string;
+  date_range: string;
+  start_date: string;
+  end_date: string;
+  total_trades: number;
+  win_rate: number;
+  total_return_pct: number;
+  sharpe_ratio: number;
+  max_drawdown_pct: number;
+  profit_factor: number;
 }

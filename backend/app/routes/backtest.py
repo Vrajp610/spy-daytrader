@@ -1,6 +1,7 @@
 """Backtest routes: run backtests, get results."""
 
 from __future__ import annotations
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,17 +16,26 @@ router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
 @router.post("/run", response_model=BacktestResult)
 async def run_backtest(req: BacktestRequest, db: AsyncSession = Depends(get_db)):
+    # Validate dates
+    if req.start_date >= req.end_date:
+        raise HTTPException(400, "start_date must be before end_date")
+
     try:
         bt = Backtester(
             strategies=req.strategies,
             initial_capital=req.initial_capital,
             use_regime_filter=req.use_regime_filter,
         )
-        result = bt.run(
-            symbol="SPY",
-            start_date=req.start_date,
-            end_date=req.end_date,
-            interval=req.interval,
+        # Run CPU-bound backtest in thread pool to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: bt.run(
+                symbol="SPY",
+                start_date=req.start_date,
+                end_date=req.end_date,
+                interval=req.interval,
+            ),
         )
 
         # Save to DB

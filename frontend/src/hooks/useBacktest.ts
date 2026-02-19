@@ -29,8 +29,11 @@ export function useBacktest() {
     try {
       const data = await getBacktestResults();
       setResults(data);
+      if (data.length > 0 && !current) {
+        setCurrent(data[0]);
+      }
     } catch { /* ignore */ }
-  }, []);
+  }, [current]);
 
   return { results, current, loading, error, run, loadHistory };
 }

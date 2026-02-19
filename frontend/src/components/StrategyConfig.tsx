@@ -33,6 +33,13 @@ export default function StrategyConfigPanel() {
     ema_crossover: 'EMA Crossover + RSI',
     volume_flow: 'Volume Profile + Order Flow',
     mtf_momentum: 'Multi-TF Momentum',
+    rsi_divergence: 'RSI Divergence',
+    bb_squeeze: 'Bollinger Band Squeeze',
+    macd_reversal: 'MACD Reversal',
+    momentum_scalper: 'Momentum Scalper',
+    gap_fill: 'Gap Fill',
+    micro_pullback: 'Micro Pullback',
+    double_bottom_top: 'Double Bottom/Top',
   };
 
   return (

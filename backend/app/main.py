@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import init_db
 from app.websocket import ws_manager
 from app.routes import trading, backtest, account, settings as settings_routes
+from app.routes import leaderboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,9 +26,20 @@ async def lifespan(app: FastAPI):
     logger.info("Starting SPY DayTrader backend...")
     await init_db()
     logger.info("Database initialized")
-    yield
-    logger.info("Shutting down...")
+
+    from app.services.auto_backtester import auto_backtester
     from app.services.trading_engine import trading_engine
+
+    await auto_backtester.start()
+    logger.info("Auto-backtester started")
+
+    await trading_engine.start()
+    logger.info("Trading engine started")
+
+    yield
+
+    logger.info("Shutting down...")
+    await auto_backtester.stop()
     if trading_engine.running:
         await trading_engine.stop()
 
@@ -52,6 +64,7 @@ app.include_router(trading.router)
 app.include_router(backtest.router)
 app.include_router(account.router)
 app.include_router(settings_routes.router)
+app.include_router(leaderboard.router)
 
 
 @app.websocket("/ws")
@@ -64,6 +77,8 @@ async def websocket_endpoint(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text('{"type":"pong","data":{}}')
     except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
         ws_manager.disconnect(websocket)
 
 

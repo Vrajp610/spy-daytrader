@@ -19,19 +19,22 @@ async def get_strategy_configs(db: AsyncSession = Depends(get_db)):
     result = await db.execute(stmt)
     configs = result.scalars().all()
 
-    # If no configs in DB, return defaults from trading engine
-    if not configs:
-        defaults = []
-        for name, strategy in trading_engine.strategies.items():
-            defaults.append(StrategyConfigOut(
+    # Build map of DB configs by name
+    db_map = {c.name: c for c in configs}
+
+    # Merge: use DB config if exists, otherwise default from engine
+    merged = []
+    for name, strategy in trading_engine.strategies.items():
+        if name in db_map:
+            merged.append(StrategyConfigOut.model_validate(db_map[name]))
+        else:
+            merged.append(StrategyConfigOut(
                 id=0,
                 name=name,
                 enabled=name in trading_engine.enabled_strategies,
                 params=strategy.params,
             ))
-        return defaults
-
-    return [StrategyConfigOut.model_validate(c) for c in configs]
+    return merged
 
 
 @router.put("/strategies/{name}", response_model=StrategyConfigOut)

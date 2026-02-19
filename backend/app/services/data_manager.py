@@ -109,7 +109,8 @@ class DataManager:
         if df.index.tz is not None:
             df.index = df.index.tz_convert("America/New_York")
         else:
-            df.index = df.index.tz_localize("America/New_York")
+            df.index = df.index.tz_localize("America/New_York", ambiguous="NaT", nonexistent="shift_forward")
+            df = df[df.index.notna()]
 
         df.columns = [c.lower() for c in df.columns]
         return df

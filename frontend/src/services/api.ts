@@ -2,6 +2,7 @@ import axios from 'axios';
 import type {
   BotStatus, AccountInfo, RiskMetrics, BacktestRequest,
   BacktestResult, StrategyConfig, Trade,
+  LeaderboardResponse, StrategyComparison,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -35,3 +36,13 @@ export const updateStrategyConfig = (name: string, update: Partial<StrategyConfi
 
 // Health
 export const getHealth = () => api.get('/health').then(r => r.data);
+
+// Leaderboard
+export const getLeaderboardRankings = () =>
+  api.get<LeaderboardResponse>('/leaderboard/rankings').then(r => r.data);
+export const getLeaderboardComparison = () =>
+  api.get<StrategyComparison[]>('/leaderboard/comparison').then(r => r.data);
+export const getLeaderboardProgress = () =>
+  api.get('/leaderboard/progress').then(r => r.data);
+export const triggerBacktests = () =>
+  api.post('/leaderboard/trigger').then(r => r.data);

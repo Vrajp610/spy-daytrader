@@ -144,6 +144,7 @@ class RiskManager:
         """Reset daily counters (call at start of each trading day)."""
         self.consecutive_losses = 0
         self.cooldown_until = None
+        self.circuit_breaker_active = False
 
     def get_metrics(
         self, capital: float, peak_capital: float, daily_pnl: float, trades_today: int
