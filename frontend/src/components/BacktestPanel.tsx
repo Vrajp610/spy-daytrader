@@ -7,7 +7,7 @@ export default function BacktestPanel() {
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [strategies, setStrategies] = useState(['vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum']);
+  const [strategy, setStrategy] = useState('vwap_reversion');
   const [useRegime, setUseRegime] = useState(true);
   const [capital, setCapital] = useState(25000);
 
@@ -25,19 +25,17 @@ export default function BacktestPanel() {
     run({
       start_date: startDate,
       end_date: endDate,
-      strategies,
+      strategies: [strategy],
       use_regime_filter: useRegime,
       initial_capital: capital,
     });
   };
 
-  const toggleStrategy = (s: string) => {
-    setStrategies(prev =>
-      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
-    );
-  };
-
-  const allStrategies = ['vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum'];
+  const allStrategies = [
+    'vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum',
+    'rsi_divergence', 'bb_squeeze', 'macd_reversal', 'momentum_scalper',
+    'gap_fill', 'micro_pullback', 'double_bottom_top',
+  ];
 
   return (
     <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
@@ -83,20 +81,21 @@ export default function BacktestPanel() {
         </div>
       </div>
 
-      {/* Strategy toggles */}
-      <div className="flex gap-2 mb-4">
-        {allStrategies.map(s => (
-          <button
-            key={s}
-            onClick={() => toggleStrategy(s)}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${
-              strategies.includes(s) ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'
-            }`}
+      {/* Strategy select */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex-1">
+          <label className="text-xs text-gray-400">Strategy</label>
+          <select
+            value={strategy}
+            onChange={e => setStrategy(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm"
           >
-            {s}
-          </button>
-        ))}
-        <label className="flex items-center gap-1 ml-2 text-xs text-gray-400">
+            {allStrategies.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-1 text-xs text-gray-400 mt-4">
           <input
             type="checkbox"
             checked={useRegime}
@@ -113,15 +112,15 @@ export default function BacktestPanel() {
       {current && (
         <div className="mb-4">
           <div className="grid grid-cols-4 md:grid-cols-8 gap-2 text-sm mb-3">
-            <Stat label="Return" value={`${current.total_return_pct?.toFixed(2)}%`}
+            <Stat label="Return" value={`${current.total_return_pct?.toFixed(2) ?? '--'}%`}
               color={current.total_return_pct && current.total_return_pct >= 0 ? 'text-green-400' : 'text-red-400'} />
             <Stat label="Win Rate" value={`${((current.win_rate ?? 0) * 100).toFixed(1)}%`} />
             <Stat label="Trades" value={String(current.total_trades ?? 0)} />
             <Stat label="Sharpe" value={current.sharpe_ratio?.toFixed(2) ?? '--'} />
-            <Stat label="Max DD" value={`${current.max_drawdown_pct?.toFixed(2)}%`} color="text-red-400" />
+            <Stat label="Max DD" value={`${current.max_drawdown_pct?.toFixed(2) ?? '--'}%`} color="text-red-400" />
             <Stat label="Profit Factor" value={current.profit_factor?.toFixed(2) ?? '--'} />
-            <Stat label="Avg Win" value={`$${current.avg_win?.toFixed(2)}`} color="text-green-400" />
-            <Stat label="Avg Loss" value={`$${current.avg_loss?.toFixed(2)}`} color="text-red-400" />
+            <Stat label="Avg Win" value={`$${current.avg_win?.toFixed(2) ?? '--'}`} color="text-green-400" />
+            <Stat label="Avg Loss" value={`$${current.avg_loss?.toFixed(2) ?? '--'}`} color="text-red-400" />
           </div>
 
           {current.equity_curve && <Chart equityCurve={current.equity_curve} />}

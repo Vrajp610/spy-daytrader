@@ -6,6 +6,7 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectAttempt = useRef(0);
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -13,6 +14,7 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setConnected(true);
+      reconnectAttempt.current = 0;
       // Heartbeat
       const ping = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send('ping');
@@ -29,7 +31,9 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setConnected(false);
-      reconnectTimer.current = setTimeout(connect, 3000);
+      const delay = Math.min(3000 * Math.pow(2, reconnectAttempt.current), 60000);
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => ws.close();

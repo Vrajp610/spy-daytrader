@@ -83,7 +83,11 @@ class BacktestRequest(BaseModel):
     end_date: str
     interval: str = "1m"
     initial_capital: float = 25000.0
-    strategies: list[str] = ["vwap_reversion", "orb", "ema_crossover"]
+    strategies: list[str] = [
+        "vwap_reversion", "orb", "ema_crossover", "volume_flow", "mtf_momentum",
+        "rsi_divergence", "bb_squeeze", "macd_reversal", "momentum_scalper",
+        "gap_fill", "micro_pullback", "double_bottom_top",
+    ]
     use_regime_filter: bool = True
 
 
@@ -122,6 +126,41 @@ class StrategyConfigOut(BaseModel):
 class StrategyConfigUpdate(BaseModel):
     enabled: Optional[bool] = None
     params: Optional[dict] = None
+
+
+# ── Leaderboard ─────────────────────────────────────────────────────────
+
+class StrategyRankingOut(BaseModel):
+    strategy_name: str
+    avg_sharpe_ratio: float
+    avg_profit_factor: float
+    avg_win_rate: float
+    avg_return_pct: float
+    avg_max_drawdown_pct: float
+    composite_score: float
+    total_backtest_trades: int
+    backtest_count: int
+    computed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class LeaderboardResponse(BaseModel):
+    rankings: list[StrategyRankingOut]
+    progress: dict
+
+
+class StrategyComparisonOut(BaseModel):
+    strategy: str
+    date_range: str
+    start_date: str
+    end_date: str
+    total_trades: int
+    win_rate: float
+    total_return_pct: float
+    sharpe_ratio: float
+    max_drawdown_pct: float
+    profit_factor: float
 
 
 # ── Risk ─────────────────────────────────────────────────────────────────────

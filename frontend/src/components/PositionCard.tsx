@@ -13,7 +13,7 @@ export default function PositionCard() {
       } catch { /* ignore */ }
     };
     refresh();
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -33,7 +33,11 @@ export default function PositionCard() {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Qty</span>
-            <span className="font-mono">{position.quantity}</span>
+            <span className="font-mono">
+              {position.original_quantity && position.original_quantity !== position.quantity
+                ? `${position.quantity} / ${position.original_quantity}`
+                : position.quantity}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Entry</span>
@@ -41,7 +45,14 @@ export default function PositionCard() {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Stop</span>
-            <span className="font-mono text-red-400">${position.stop_loss.toFixed(2)}</span>
+            <span className="font-mono text-red-400">
+              ${position.stop_loss.toFixed(2)}
+              {position.effective_stop !== undefined && position.effective_stop !== position.stop_loss && (
+                <span className="text-yellow-400 ml-1">
+                  (eff: ${position.effective_stop.toFixed(2)})
+                </span>
+              )}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Target</span>
@@ -51,6 +62,33 @@ export default function PositionCard() {
             <span className="text-gray-400">Strategy</span>
             <span className="text-sm">{position.strategy}</span>
           </div>
+          {position.scales_completed && position.scales_completed.length > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-400">Scales</span>
+              <div className="flex gap-1">
+                {[1, 2].map(s => (
+                  <span
+                    key={s}
+                    className={`text-xs px-1.5 py-0.5 rounded ${
+                      position.scales_completed!.includes(s)
+                        ? 'bg-green-900 text-green-300'
+                        : 'bg-gray-800 text-gray-500'
+                    }`}
+                  >
+                    S{s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {position.unrealized_pnl !== undefined && (
+            <div className="flex justify-between">
+              <span className="text-gray-400">Unrealized P&L</span>
+              <span className={`font-mono font-medium ${position.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                ${position.unrealized_pnl.toFixed(2)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-gray-400">Entry Time</span>
             <span className="text-xs font-mono">{new Date(position.entry_time).toLocaleTimeString()}</span>

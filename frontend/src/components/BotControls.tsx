@@ -14,7 +14,7 @@ export default function BotControls() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
   }, []);
 
