@@ -423,10 +423,31 @@ class TradingEngine:
             await self._close_options_position(current_price, "eod")
             return
 
-        # 3. Strategy-specific profit/loss targets
+        # 3. Strategy-specific profit/loss targets with time-based trailing stops
         exit_rules = OPTIONS_EXIT_RULES.get(pos.strategy_type, {})
         take_profit_pct = exit_rules.get("take_profit_pct", 0.50)
-        stop_loss_pct = exit_rules.get("stop_loss_pct", 2.0)
+        initial_stop = exit_rules.get("initial_stop_mult", 2.0)
+        tight_stop = exit_rules.get("tight_stop_mult", 1.0)
+        dte_tighten = exit_rules.get("dte_tighten", 3)
+
+        # Calculate current stop multiplier based on DTE
+        # Linearly interpolate from initial_stop to tight_stop as DTE decreases
+        dte = 99
+        if pos.order.primary_expiration:
+            try:
+                exp_date = datetime.strptime(pos.order.primary_expiration, "%Y-%m-%d").date()
+                dte = (exp_date - now.date()).days
+            except ValueError:
+                pass
+
+        if dte <= dte_tighten:
+            stop_mult = tight_stop
+        elif dte >= dte_tighten + 5:
+            stop_mult = initial_stop
+        else:
+            # Linear interpolation
+            t = (dte - dte_tighten) / 5.0
+            stop_mult = tight_stop + t * (initial_stop - tight_stop)
 
         pnl = pos.unrealized_pnl()
         max_profit = pos.order.max_profit
@@ -441,12 +462,12 @@ class TradingEngine:
                 )
                 return
 
-            # Credit spread stop: loss exceeds N x credit received
+            # Credit spread stop: loss exceeds stop_mult x credit received
             entry_credit = pos.entry_net_premium * pos.order.contracts * 100
-            if pnl < 0 and abs(pnl) >= entry_credit * stop_loss_pct:
+            if pnl < 0 and abs(pnl) >= entry_credit * stop_mult:
                 await self._close_options_position(
                     current_price,
-                    f"stop_loss_{stop_loss_pct:.0f}x_credit",
+                    f"stop_loss_{stop_mult:.1f}x_credit",
                 )
                 return
         else:
@@ -461,26 +482,25 @@ class TradingEngine:
                     )
                     return
 
-                if gain_pct <= -stop_loss_pct:
+                if gain_pct <= -stop_mult:
                     await self._close_options_position(
                         current_price,
-                        f"stop_loss_{stop_loss_pct:.0%}_premium",
+                        f"stop_loss_{stop_mult:.0%}_premium",
                     )
                     return
 
-        # 4. Straddle/strangle: check individual legs
+        # 4. Straddle/strangle: check total position P&L
         if pos.strategy_type in (
             OptionsStrategyType.LONG_STRADDLE,
             OptionsStrategyType.LONG_STRANGLE,
         ):
             entry_cost = pos.entry_net_premium * pos.order.contracts * 100
             if entry_cost > 0:
-                loss_pct = -pnl / entry_cost if pnl < 0 else 0
-                total_stop = 0.30 if pos.strategy_type == OptionsStrategyType.LONG_STRADDLE else 0.35
-                if loss_pct >= total_stop:
+                total_gain = pnl / entry_cost
+                if total_gain <= -stop_mult:
                     await self._close_options_position(
                         current_price,
-                        f"stop_loss_{total_stop:.0%}_total",
+                        f"straddle_stop_{stop_mult:.0%}_total",
                     )
                     return
 

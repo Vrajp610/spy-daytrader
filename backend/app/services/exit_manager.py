@@ -344,7 +344,8 @@ class ExitManager:
 
         rules = OPTIONS_EXIT_RULES.get(st, {})
         tp_pct = rules.get("take_profit_pct", 0.50)
-        sl_pct = rules.get("stop_loss_pct", 2.0)
+        # Use initial (wider) stop as fallback when DTE is unknown
+        sl_pct = rules.get("initial_stop_mult", 2.0)
 
         entry_cost = entry_premium * contracts * 100
 
@@ -357,7 +358,7 @@ class ExitManager:
             if max_profit > 0 and pnl >= max_profit * tp_pct:
                 return True, f"take_profit_{tp_pct:.0%}"
             if pnl < 0 and abs(pnl) >= entry_cost * sl_pct:
-                return True, f"stop_loss_{sl_pct:.0f}x"
+                return True, f"stop_loss_{sl_pct:.1f}x"
 
         # Debit strategies
         elif st in (
@@ -377,9 +378,8 @@ class ExitManager:
             OptionsStrategyType.LONG_STRADDLE,
             OptionsStrategyType.LONG_STRANGLE,
         ):
-            total_stop = 0.30 if st == OptionsStrategyType.LONG_STRADDLE else 0.35
             if entry_cost > 0:
-                if pnl < 0 and abs(pnl) >= entry_cost * total_stop:
-                    return True, f"stop_loss_{total_stop:.0%}"
+                if pnl < 0 and abs(pnl) >= entry_cost * sl_pct:
+                    return True, f"stop_loss_{sl_pct:.0%}"
 
         return False, ""

@@ -44,52 +44,48 @@ STRATEGY_ABBREV = {
     OptionsStrategyType.LONG_STRANGLE: "STRG",
 }
 
-# Strategy-specific profit/loss targets (as fraction of max profit/premium)
-OPTIONS_EXIT_RULES = {
+# Exit rules for each options strategy type
+# take_profit_pct: fraction of max profit to take profit at
+# initial_stop_mult: initial stop loss multiplier (wider to give room)
+# tight_stop_mult: tighter stop as position ages
+# dte_tighten: DTE at which stop transitions from initial to tight
+# target_win_rate: expected win rate for Kelly sizing reference
+OPTIONS_EXIT_RULES: dict[OptionsStrategyType, dict] = {
     OptionsStrategyType.PUT_CREDIT_SPREAD: {
-        "take_profit_pct": 0.50,   # close at 50% of max profit
-        "stop_loss_pct": 2.0,      # stop at 2x credit received
-        "target_win_rate": 0.78,
+        "take_profit_pct": 0.50, "initial_stop_mult": 3.0, "tight_stop_mult": 1.5,
+        "dte_tighten": 3, "target_win_rate": 0.78,
     },
     OptionsStrategyType.CALL_CREDIT_SPREAD: {
-        "take_profit_pct": 0.50,
-        "stop_loss_pct": 2.0,
-        "target_win_rate": 0.78,
+        "take_profit_pct": 0.50, "initial_stop_mult": 3.0, "tight_stop_mult": 1.5,
+        "dte_tighten": 3, "target_win_rate": 0.78,
     },
     OptionsStrategyType.PUT_DEBIT_SPREAD: {
-        "take_profit_pct": 1.0,    # 100% of premium paid (double)
-        "stop_loss_pct": 0.50,     # stop at 50% loss of premium
-        "target_win_rate": 0.50,
+        "take_profit_pct": 1.00, "initial_stop_mult": 0.65, "tight_stop_mult": 0.40,
+        "dte_tighten": 3, "target_win_rate": 0.50,
     },
     OptionsStrategyType.CALL_DEBIT_SPREAD: {
-        "take_profit_pct": 1.0,
-        "stop_loss_pct": 0.50,
-        "target_win_rate": 0.50,
+        "take_profit_pct": 1.00, "initial_stop_mult": 0.65, "tight_stop_mult": 0.40,
+        "dte_tighten": 3, "target_win_rate": 0.50,
     },
     OptionsStrategyType.IRON_CONDOR: {
-        "take_profit_pct": 0.50,
-        "stop_loss_pct": 2.0,
-        "target_win_rate": 0.70,
+        "take_profit_pct": 0.50, "initial_stop_mult": 2.5, "tight_stop_mult": 1.5,
+        "dte_tighten": 3, "target_win_rate": 0.70,
     },
     OptionsStrategyType.LONG_CALL: {
-        "take_profit_pct": 0.75,   # 50-100% of premium, use 75% middle
-        "stop_loss_pct": 0.40,
-        "target_win_rate": 0.45,
+        "take_profit_pct": 0.80, "initial_stop_mult": 0.50, "tight_stop_mult": 0.30,
+        "dte_tighten": 3, "target_win_rate": 0.42,
     },
     OptionsStrategyType.LONG_PUT: {
-        "take_profit_pct": 0.75,
-        "stop_loss_pct": 0.40,
-        "target_win_rate": 0.45,
+        "take_profit_pct": 0.80, "initial_stop_mult": 0.50, "tight_stop_mult": 0.30,
+        "dte_tighten": 3, "target_win_rate": 0.42,
     },
     OptionsStrategyType.LONG_STRADDLE: {
-        "take_profit_pct": 0.80,   # either leg hits 80% gain
-        "stop_loss_pct": 0.30,     # total position down 30%
-        "target_win_rate": 0.40,
+        "take_profit_pct": 0.80, "initial_stop_mult": 0.40, "tight_stop_mult": 0.25,
+        "dte_tighten": 2, "target_win_rate": 0.38,
     },
     OptionsStrategyType.LONG_STRANGLE: {
-        "take_profit_pct": 1.0,    # either leg hits 100% gain
-        "stop_loss_pct": 0.35,
-        "target_win_rate": 0.35,
+        "take_profit_pct": 1.00, "initial_stop_mult": 0.45, "tight_stop_mult": 0.30,
+        "dte_tighten": 2, "target_win_rate": 0.35,
     },
 }
 
