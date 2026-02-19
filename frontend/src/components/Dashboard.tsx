@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAccount } from '../hooks/useAccount';
 import { useTrades } from '../hooks/useTrades';
@@ -11,10 +12,17 @@ import StrategyConfigPanel from './StrategyConfig';
 import TradingSettingsPanel from './TradingSettings';
 import StrategyLeaderboard from './StrategyLeaderboard';
 
+type SlidePanel = 'settings' | 'strategies' | null;
+
 export default function Dashboard() {
   const { lastMessage, connected } = useWebSocket();
   const { account, risk } = useAccount();
   const { trades, total } = useTrades();
+  const [openPanel, setOpenPanel] = useState<SlidePanel>(null);
+
+  const togglePanel = (panel: SlidePanel) => {
+    setOpenPanel(prev => prev === panel ? null : panel);
+  };
 
   return (
     <div className="min-h-screen bg-terminal-950 bg-surface-noise text-terminal-100">
@@ -27,6 +35,27 @@ export default function Dashboard() {
           <span className="badge badge-paper">v1.0</span>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <button
+            onClick={() => togglePanel('settings')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              openPanel === 'settings'
+                ? 'bg-accent text-white'
+                : 'bg-terminal-700/50 hover:bg-terminal-600/50 text-terminal-200'
+            }`}
+          >
+            Settings
+          </button>
+          <button
+            onClick={() => togglePanel('strategies')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              openPanel === 'strategies'
+                ? 'bg-accent text-white'
+                : 'bg-terminal-700/50 hover:bg-terminal-600/50 text-terminal-200'
+            }`}
+          >
+            Strategies
+          </button>
+          <div className="w-px h-5 bg-terminal-600/30" />
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-profit animate-pulse-slow' : 'bg-loss'}`} />
             <span className="text-muted text-xs">{connected ? 'Connected' : 'Offline'}</span>
@@ -38,6 +67,33 @@ export default function Dashboard() {
           )}
         </div>
       </header>
+
+      {/* Slide-out panel overlay */}
+      {openPanel && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm animate-fade-in"
+            onClick={() => setOpenPanel(null)}
+          />
+          <div className="fixed top-[49px] right-0 z-50 w-full max-w-md h-[calc(100vh-49px)] overflow-y-auto bg-terminal-900 border-l border-terminal-600/30 shadow-2xl animate-fade-in">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-terminal-200 uppercase tracking-wider">
+                  {openPanel === 'settings' ? 'Trading Settings' : 'Strategy Config'}
+                </h2>
+                <button
+                  onClick={() => setOpenPanel(null)}
+                  className="text-muted hover:text-terminal-100 text-lg leading-none px-1"
+                >
+                  &times;
+                </button>
+              </div>
+              {openPanel === 'settings' && <TradingSettingsPanel />}
+              {openPanel === 'strategies' && <StrategyConfigPanel />}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Main Grid */}
       <main className="p-3 md:p-5 space-y-3">
@@ -55,16 +111,8 @@ export default function Dashboard() {
         {/* Strategy Leaderboard */}
         <StrategyLeaderboard />
 
-        {/* Bottom: Backtesting + Strategy Config */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div className="lg:col-span-2">
-            <BacktestPanel />
-          </div>
-          <div className="space-y-3">
-            <TradingSettingsPanel />
-            <StrategyConfigPanel />
-          </div>
-        </div>
+        {/* Bottom: Backtesting */}
+        <BacktestPanel />
       </main>
     </div>
   );

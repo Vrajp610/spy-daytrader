@@ -196,6 +196,7 @@ class TradingSettingsOut(BaseModel):
     max_trades_per_day: int
     cooldown_after_consecutive_losses: int
     cooldown_minutes: int
+    min_signal_confidence: float
 
 
 class TradingSettingsUpdate(BaseModel):
@@ -207,6 +208,7 @@ class TradingSettingsUpdate(BaseModel):
     max_trades_per_day: Optional[int] = None
     cooldown_after_consecutive_losses: Optional[int] = None
     cooldown_minutes: Optional[int] = None
+    min_signal_confidence: Optional[float] = None
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

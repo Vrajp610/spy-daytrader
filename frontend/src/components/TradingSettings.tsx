@@ -85,6 +85,15 @@ const FIELDS: FieldConfig[] = [
     max: 240,
     step: 5,
   },
+  {
+    key: 'min_signal_confidence',
+    label: 'Min Signal Confidence',
+    description: 'Minimum confidence score (0-1) to execute a signal',
+    type: 'percent',
+    min: 0,
+    max: 100,
+    step: 5,
+  },
 ];
 
 export default function TradingSettingsPanel() {

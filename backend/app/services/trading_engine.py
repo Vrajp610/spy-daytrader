@@ -14,7 +14,7 @@ from app.services.data_manager import DataManager
 from app.services.exit_manager import ExitManager, PositionState
 from app.services.paper_engine import PaperEngine
 from app.services.risk_manager import RiskManager
-from app.services.strategies.base import BaseStrategy, Direction, TradeSignal, ExitReason
+from app.services.strategies.base import BaseStrategy, Direction, TradeSignal, ExitReason, MarketContext
 from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
 from app.services.strategies.orb import ORBStrategy
@@ -73,10 +73,14 @@ class TradingEngine:
 
         self._task: Optional[asyncio.Task] = None
         self._last_data_fetch: Optional[datetime] = None
+        self._last_extended_fetch: Optional[datetime] = None
         self._last_trading_date = None
         self._df_1min: Optional[pd.DataFrame] = None
         self._df_5min: Optional[pd.DataFrame] = None
         self._df_15min: Optional[pd.DataFrame] = None
+        self._df_30min: Optional[pd.DataFrame] = None
+        self._df_1hr: Optional[pd.DataFrame] = None
+        self._df_4hr: Optional[pd.DataFrame] = None
 
     async def start(self):
         if self.running:
@@ -195,6 +199,19 @@ class TradingEngine:
                 self._df_1min = self.data_manager.add_indicators(self._df_1min)
                 self._df_5min = self.data_manager.resample_to_5min(self._df_1min)
             self._last_data_fetch = datetime.now(ET)
+
+            # Fetch extended TF data every 15 minutes
+            now = datetime.now(ET)
+            if (self._last_extended_fetch is None
+                    or (now - self._last_extended_fetch).total_seconds() >= 900):
+                ext = await loop.run_in_executor(
+                    None, lambda: self.data_manager.fetch_extended_data("SPY")
+                )
+                if ext:
+                    self._df_30min = ext.get("df_30min")
+                    self._df_1hr = ext.get("df_1hr")
+                    self._df_4hr = ext.get("df_4hr")
+                    self._last_extended_fetch = now
         except Exception as e:
             logger.error(f"Data fetch error: {e}")
 
@@ -218,6 +235,17 @@ class TradingEngine:
             if s in REGIME_STRATEGY_MAP.get(self.current_regime, [])
         ]
 
+        # Build MarketContext for confluence scoring
+        ctx = MarketContext(
+            df_1min=self._df_1min if self._df_1min is not None else pd.DataFrame(),
+            df_5min=self._df_5min if self._df_5min is not None else pd.DataFrame(),
+            df_15min=self._df_15min if self._df_15min is not None else pd.DataFrame(),
+            df_30min=self._df_30min if self._df_30min is not None else pd.DataFrame(),
+            df_1hr=self._df_1hr if self._df_1hr is not None else pd.DataFrame(),
+            df_4hr=self._df_4hr if self._df_4hr is not None else pd.DataFrame(),
+            regime=self.current_regime,
+        )
+
         # Collect all signals from eligible strategies
         candidates = []
         now = datetime.now(ET)
@@ -228,7 +256,7 @@ class TradingEngine:
 
             if strat_name == "ema_crossover" and self._df_5min is not None and len(self._df_5min) > 30:
                 idx = len(self._df_5min) - 1
-                signal = strategy.generate_signal(self._df_5min, idx, now)
+                signal = strategy.generate_signal(self._df_5min, idx, now, market_context=ctx)
             elif strat_name == "mtf_momentum":
                 if (self._df_1min is not None and len(self._df_1min) > 30
                         and self._df_5min is not None and len(self._df_5min) > 20
@@ -237,22 +265,37 @@ class TradingEngine:
                     signal = strategy.generate_signal(
                         self._df_1min, idx, now,
                         df_5min=self._df_5min, df_15min=self._df_15min,
+                        market_context=ctx,
                     )
                 else:
                     continue
             elif self._df_1min is not None and len(self._df_1min) > 30:
                 idx = len(self._df_1min) - 1
-                signal = strategy.generate_signal(self._df_1min, idx, now)
+                signal = strategy.generate_signal(self._df_1min, idx, now, market_context=ctx)
             else:
                 continue
 
             if signal:
-                # Score: confidence * risk-reward ratio (capped at 5)
-                rr = abs(signal.take_profit - signal.entry_price) / abs(signal.entry_price - signal.stop_loss) if abs(signal.entry_price - signal.stop_loss) > 0 else 1.0
+                # Apply multi-timeframe confluence scoring
+                confluence = BaseStrategy.compute_confluence_score(ctx, signal.direction)
+                confluence_weight = confluence / 100.0  # 0.0 - 1.0
+                # Blend strategy confidence with confluence (60% strategy, 40% confluence)
+                signal.confidence = signal.confidence * 0.6 + confluence_weight * 0.4
+
+                # R:R hard gate — require >= 2:1
+                stop_dist = abs(signal.entry_price - signal.stop_loss)
+                tp_dist = abs(signal.take_profit - signal.entry_price)
+                rr = tp_dist / stop_dist if stop_dist > 0 else 1.0
+                if rr < 2.0:
+                    continue
+
                 score = signal.confidence * min(rr, 5.0) / 5.0
                 candidates.append((strat_name, signal, score))
 
-        # Execute best-scored signal
+        # Execute best-scored signal (filtered by minimum confidence)
+        if candidates:
+            min_conf = settings.min_signal_confidence
+            candidates = [(s, sig, sc) for s, sig, sc in candidates if sig.confidence >= min_conf]
         if candidates:
             candidates.sort(key=lambda x: x[2], reverse=True)
             strat_name, signal, score = candidates[0]
@@ -289,12 +332,16 @@ class TradingEngine:
                         "regime": self.current_regime.value,
                     })
             else:
-                # Live mode
+                # Live mode — use bracket orders for broker-enforced stops
                 from app.services.schwab_client import schwab_client
                 side = "BUY" if signal.direction == Direction.LONG else "SELL"
-                result = await schwab_client.place_order("SPY", quantity, side)
+                result = await schwab_client.place_bracket_order(
+                    "SPY", quantity, side,
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                )
                 if result and result.get("status") == "FILLED":
-                    self.paper_engine.open_position(
+                    pos = self.paper_engine.open_position(
                         symbol="SPY",
                         direction=signal.direction.value,
                         quantity=quantity,
@@ -303,6 +350,8 @@ class TradingEngine:
                         take_profit=signal.take_profit,
                         strategy=strat_name,
                     )
+                    if pos:
+                        pos.bracket_order_id = result.get("order_id")
                     await ws_manager.broadcast("trade_update", {
                         "action": "OPEN",
                         "strategy": strat_name,
@@ -415,6 +464,10 @@ class TradingEngine:
             if schwab_client.is_configured:
                 pos = self.paper_engine.position
                 if pos:
+                    # Cancel outstanding bracket children before closing
+                    bracket_id = getattr(pos, "bracket_order_id", None)
+                    if bracket_id:
+                        await schwab_client.cancel_order(bracket_id)
                     side = "SELL" if pos.direction == "LONG" else "BUY"
                     await schwab_client.place_order("SPY", pos.quantity, side)
 
@@ -436,8 +489,23 @@ class TradingEngine:
             if schwab_client.is_configured:
                 pos = self.paper_engine.position
                 if pos:
+                    # Cancel existing bracket children, then place partial close
+                    bracket_id = getattr(pos, "bracket_order_id", None)
+                    if bracket_id:
+                        await schwab_client.cancel_order(bracket_id)
                     side = "SELL" if pos.direction == "LONG" else "BUY"
                     await schwab_client.place_order("SPY", quantity, side)
+                    # Place new bracket for remaining quantity
+                    remaining = pos.quantity - quantity
+                    if remaining > 0 and pos.stop_loss and pos.take_profit:
+                        entry_side = "BUY" if pos.direction == "LONG" else "SELL"
+                        result = await schwab_client.place_bracket_order(
+                            "SPY", remaining, entry_side,
+                            stop_loss=pos.effective_stop or pos.stop_loss,
+                            take_profit=pos.take_profit,
+                        )
+                        if result and result.get("order_id"):
+                            pos.bracket_order_id = result["order_id"]
 
         bar_volume = int(self._df_1min.iloc[-1]["volume"]) if self._df_1min is not None and not self._df_1min.empty else 0
         current_bar_count = len(self._df_1min) if self._df_1min is not None else 0

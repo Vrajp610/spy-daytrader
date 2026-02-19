@@ -132,6 +132,7 @@ export interface TradingSettings {
   max_trades_per_day: number;
   cooldown_after_consecutive_losses: number;
   cooldown_minutes: number;
+  min_signal_confidence: number;
 }
 
 // ── WebSocket Message ────────────────────────────────────────────

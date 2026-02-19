@@ -89,6 +89,7 @@ async def get_trading_settings():
         max_trades_per_day=settings.max_trades_per_day,
         cooldown_after_consecutive_losses=settings.cooldown_after_consecutive_losses,
         cooldown_minutes=settings.cooldown_minutes,
+        min_signal_confidence=settings.min_signal_confidence,
     )
 
 
@@ -146,6 +147,11 @@ async def update_trading_settings(update: TradingSettingsUpdate):
         settings.cooldown_minutes = update.cooldown_minutes
         trading_engine.risk_manager.cooldown_minutes = update.cooldown_minutes
 
+    if update.min_signal_confidence is not None:
+        if not 0.0 <= update.min_signal_confidence <= 1.0:
+            raise HTTPException(400, "Min signal confidence must be between 0% and 100%")
+        settings.min_signal_confidence = update.min_signal_confidence
+
     # Persist to database
     async with async_session() as db:
         stmt = select(TradingConfig).where(TradingConfig.id == 1)
@@ -164,6 +170,7 @@ async def update_trading_settings(update: TradingSettingsUpdate):
         config.max_trades_per_day = settings.max_trades_per_day
         config.cooldown_after_consecutive_losses = settings.cooldown_after_consecutive_losses
         config.cooldown_minutes = settings.cooldown_minutes
+        config.min_signal_confidence = settings.min_signal_confidence
 
         await db.commit()
 
@@ -189,6 +196,8 @@ async def load_trading_config_from_db():
             settings.max_trades_per_day = config.max_trades_per_day
             settings.cooldown_after_consecutive_losses = config.cooldown_after_consecutive_losses
             settings.cooldown_minutes = config.cooldown_minutes
+            if config.min_signal_confidence is not None:
+                settings.min_signal_confidence = config.min_signal_confidence
 
             import logging
             logging.getLogger(__name__).info("Loaded trading config from database")

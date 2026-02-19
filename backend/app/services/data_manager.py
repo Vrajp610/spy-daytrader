@@ -29,6 +29,12 @@ _PERIOD_SECONDS = {
 class DataManager:
     """Fetches SPY data and computes technical indicators."""
 
+    def __init__(self):
+        # Cache for extended timeframe data (refreshed every 15 min)
+        self._extended_cache: Optional[dict] = None
+        self._extended_cache_time: Optional[datetime] = None
+        self._extended_cache_ttl = 900  # 15 minutes
+
     @staticmethod
     def _fetch_yahoo_chart(
         symbol: str,
@@ -272,3 +278,77 @@ class DataManager:
             "volume": "sum",
         }).dropna()
         return DataManager.add_indicators(resampled)
+
+    def fetch_extended_data(self, symbol: str = "SPY") -> Optional[dict]:
+        """Fetch 60-day hourly data and resample to 4hr, 1hr, 30min timeframes.
+
+        Results are cached for 15 minutes since higher TFs don't need rapid refresh.
+        """
+        now = datetime.now()
+        if (self._extended_cache is not None
+                and self._extended_cache_time is not None
+                and (now - self._extended_cache_time).total_seconds() < self._extended_cache_ttl):
+            return self._extended_cache
+
+        try:
+            # Fetch 60 days of hourly data
+            df_hourly = self._fetch_yahoo_chart(symbol, period="60d", interval="1h")
+            if df_hourly.empty:
+                logger.warning("Extended data fetch returned empty — trying 30d")
+                df_hourly = self._fetch_yahoo_chart(symbol, period="30d", interval="1h")
+
+            if df_hourly.empty:
+                logger.warning("Extended hourly data unavailable")
+                return self._extended_cache
+
+            # Localize timezone
+            if df_hourly.index.tz is not None:
+                df_hourly.index = df_hourly.index.tz_convert("America/New_York")
+            else:
+                df_hourly.index = df_hourly.index.tz_localize(
+                    "America/New_York", ambiguous="NaT", nonexistent="shift_forward"
+                )
+                df_hourly = df_hourly[df_hourly.index.notna()]
+
+            df_hourly.columns = [c.lower() for c in df_hourly.columns]
+            df_hourly = self.validate_bars(df_hourly)
+
+            if df_hourly.empty:
+                return self._extended_cache
+
+            # Add indicators to the 1hr data
+            df_1hr = self.add_indicators(df_hourly)
+
+            # Resample to higher timeframes
+            df_4hr = self.resample_to_interval(df_hourly, "4h")
+            df_30min_raw = self._fetch_yahoo_chart(symbol, period="60d", interval="30m")
+            if not df_30min_raw.empty:
+                if df_30min_raw.index.tz is not None:
+                    df_30min_raw.index = df_30min_raw.index.tz_convert("America/New_York")
+                else:
+                    df_30min_raw.index = df_30min_raw.index.tz_localize(
+                        "America/New_York", ambiguous="NaT", nonexistent="shift_forward"
+                    )
+                    df_30min_raw = df_30min_raw[df_30min_raw.index.notna()]
+                df_30min_raw.columns = [c.lower() for c in df_30min_raw.columns]
+                df_30min_raw = self.validate_bars(df_30min_raw)
+                df_30min = self.add_indicators(df_30min_raw)
+            else:
+                # Fallback: resample hourly to 30min is not ideal but provides data
+                df_30min = df_1hr.copy()
+
+            self._extended_cache = {
+                "df_30min": df_30min,
+                "df_1hr": df_1hr,
+                "df_4hr": df_4hr,
+            }
+            self._extended_cache_time = now
+            logger.info(
+                f"Fetched extended TF data: 4hr={len(df_4hr)} bars, "
+                f"1hr={len(df_1hr)} bars, 30min={len(df_30min)} bars"
+            )
+            return self._extended_cache
+
+        except Exception as e:
+            logger.error(f"Extended data fetch error: {e}")
+            return self._extended_cache

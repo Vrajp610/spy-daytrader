@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_trades_per_day: int = 10
     cooldown_after_consecutive_losses: int = 3
     cooldown_minutes: int = 15
+    min_signal_confidence: float = 0.6
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"

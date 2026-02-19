@@ -124,6 +124,166 @@ class SchwabClient:
             logger.error(f"Error placing order: {e}")
             return None
 
+    async def place_bracket_order(
+        self,
+        symbol: str,
+        quantity: int,
+        side: str,  # "BUY" or "SELL"
+        stop_loss: float,
+        take_profit: float,
+        trailing_stop_pct: Optional[float] = None,
+    ) -> Optional[dict]:
+        """Place a bracket order (OTO): market entry + stop loss + take profit.
+
+        The broker enforces the stops even if the bot goes offline.
+        """
+        if not self._client or not self._account_hash:
+            return None
+        try:
+            from schwab.orders.equities import equity_buy_market, equity_sell_market
+            from schwab.orders.common import OrderType, Session, Duration, one_cancels_other
+
+            # Primary leg: market order
+            if side == "BUY":
+                primary = equity_buy_market(symbol, quantity)
+                # Exit side for children
+                exit_side_stop = equity_sell_market(symbol, quantity)
+                exit_side_tp = equity_sell_market(symbol, quantity)
+            else:
+                primary = equity_sell_market(symbol, quantity)
+                exit_side_stop = equity_buy_market(symbol, quantity)
+                exit_side_tp = equity_buy_market(symbol, quantity)
+
+            # Build stop loss child order
+            from schwab.orders.equities import equity_buy_limit, equity_sell_limit
+            from schwab.orders.common import StopPriceLinkBasis, StopPriceLinkType
+
+            # Stop loss order
+            stop_order_spec = {
+                "orderType": "STOP",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "stopPrice": str(round(stop_loss, 2)),
+                "orderLegCollection": [{
+                    "instruction": "SELL" if side == "BUY" else "BUY",
+                    "quantity": quantity,
+                    "instrument": {"symbol": symbol, "assetType": "EQUITY"},
+                }],
+            }
+
+            # Take profit order (limit)
+            tp_order_spec = {
+                "orderType": "LIMIT",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "price": str(round(take_profit, 2)),
+                "orderLegCollection": [{
+                    "instruction": "SELL" if side == "BUY" else "BUY",
+                    "quantity": quantity,
+                    "instrument": {"symbol": symbol, "assetType": "EQUITY"},
+                }],
+            }
+
+            # Build OTO bracket: primary triggers OCO(stop, target)
+            bracket_spec = {
+                "orderType": "MARKET",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "orderStrategyType": "TRIGGER",
+                "orderLegCollection": [{
+                    "instruction": side,
+                    "quantity": quantity,
+                    "instrument": {"symbol": symbol, "assetType": "EQUITY"},
+                }],
+                "childOrderStrategies": [{
+                    "orderStrategyType": "OCO",
+                    "childOrderStrategies": [stop_order_spec, tp_order_spec],
+                }],
+            }
+
+            resp = self._client.place_order(self._account_hash, bracket_spec)
+            if resp.status_code in (200, 201):
+                order_id = resp.headers.get("Location", "").split("/")[-1]
+                logger.info(f"Bracket order placed: {order_id} ({side} {quantity} {symbol} "
+                            f"SL={stop_loss} TP={take_profit})")
+                return {"order_id": order_id, "status": "FILLED"}
+            else:
+                logger.error(f"Bracket order failed: {resp.status_code} {resp.text}")
+                return {"order_id": None, "status": "FAILED", "error": resp.text}
+        except Exception as e:
+            logger.error(f"Error placing bracket order: {e}")
+            return None
+
+    async def place_trailing_stop(
+        self,
+        symbol: str,
+        quantity: int,
+        side: str,  # "SELL" to protect long, "BUY" to protect short
+        trail_pct: float,
+    ) -> Optional[dict]:
+        """Place a trailing stop order (percentage-based)."""
+        if not self._client or not self._account_hash:
+            return None
+        try:
+            trailing_spec = {
+                "orderType": "TRAILING_STOP",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "stopPriceLinkBasis": "LAST",
+                "stopPriceLinkType": "PERCENT",
+                "stopPriceOffset": str(round(trail_pct, 2)),
+                "orderLegCollection": [{
+                    "instruction": side,
+                    "quantity": quantity,
+                    "instrument": {"symbol": symbol, "assetType": "EQUITY"},
+                }],
+            }
+
+            resp = self._client.place_order(self._account_hash, trailing_spec)
+            if resp.status_code in (200, 201):
+                order_id = resp.headers.get("Location", "").split("/")[-1]
+                logger.info(f"Trailing stop placed: {order_id} ({side} {quantity} {symbol} trail={trail_pct}%)")
+                return {"order_id": order_id, "status": "PLACED"}
+            else:
+                logger.error(f"Trailing stop failed: {resp.status_code} {resp.text}")
+                return {"order_id": None, "status": "FAILED", "error": resp.text}
+        except Exception as e:
+            logger.error(f"Error placing trailing stop: {e}")
+            return None
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel an existing order by ID."""
+        if not self._client or not self._account_hash:
+            return False
+        try:
+            resp = self._client.cancel_order(order_id, self._account_hash)
+            if resp.status_code in (200, 201):
+                logger.info(f"Order {order_id} cancelled")
+                return True
+            else:
+                logger.error(f"Cancel order failed: {resp.status_code} {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error cancelling order: {e}")
+            return False
+
+    async def replace_order(self, order_id: str, new_order: dict) -> Optional[dict]:
+        """Replace (modify) an existing order with a new order spec."""
+        if not self._client or not self._account_hash:
+            return None
+        try:
+            resp = self._client.replace_order(self._account_hash, order_id, new_order)
+            if resp.status_code in (200, 201):
+                new_id = resp.headers.get("Location", "").split("/")[-1]
+                logger.info(f"Order {order_id} replaced with {new_id}")
+                return {"order_id": new_id, "status": "REPLACED"}
+            else:
+                logger.error(f"Replace order failed: {resp.status_code} {resp.text}")
+                return {"order_id": None, "status": "FAILED", "error": resp.text}
+        except Exception as e:
+            logger.error(f"Error replacing order: {e}")
+            return None
+
     async def get_price_history(
         self,
         symbol: str = "SPY",

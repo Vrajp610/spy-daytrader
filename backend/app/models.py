@@ -131,4 +131,5 @@ class TradingConfig(Base):
     max_trades_per_day = Column(Integer, default=10)
     cooldown_after_consecutive_losses = Column(Integer, default=3)
     cooldown_minutes = Column(Integer, default=15)
+    min_signal_confidence = Column(Float, default=0.6)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
