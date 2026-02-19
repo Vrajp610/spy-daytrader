@@ -256,6 +256,21 @@ async def load_trading_config_from_db():
 
             import logging
             logging.getLogger(__name__).info("Loaded trading config from database")
+
+            # Sync to already-instantiated risk manager and paper engine
+            rm = trading_engine.risk_manager
+            rm.max_risk_per_trade = settings.max_risk_per_trade
+            rm.daily_loss_limit = settings.daily_loss_limit
+            rm.max_drawdown = settings.max_drawdown
+            rm.max_position_pct = settings.max_position_pct
+            rm.max_trades_per_day = settings.max_trades_per_day
+            rm.cooldown_after_losses = settings.cooldown_after_consecutive_losses
+            rm.cooldown_minutes = settings.cooldown_minutes
+
+            if not trading_engine.running:
+                trading_engine.paper_engine.capital = settings.initial_capital
+                trading_engine.paper_engine.initial_capital = settings.initial_capital
+                trading_engine.paper_engine.peak_capital = settings.initial_capital
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"Could not load trading config from DB: {e}")

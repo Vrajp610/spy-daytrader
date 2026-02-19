@@ -93,9 +93,10 @@ async def get_risk_metrics():
     rm = trading_engine.risk_manager
 
     trades_today = pe.trades_today
+    daily_pnl = pe.daily_pnl
 
-    # If in-memory trades_today is 0, check DB
-    if trades_today == 0:
+    # If in-memory is empty, check DB for today's data
+    if trades_today == 0 or daily_pnl == 0.0:
         from app.database import async_session
         from app.models import Trade as TradeModel
         from sqlalchemy import select, func
@@ -105,15 +106,24 @@ async def get_risk_metrics():
         today = datetime.now(ET).date()
         today_start = datetime.combine(today, datetime.min.time())
         async with async_session() as db:
-            stmt = select(func.count()).select_from(TradeModel).where(
-                TradeModel.status == "CLOSED",
-                TradeModel.exit_time >= today_start,
-            )
-            result = await db.execute(stmt)
-            trades_today = result.scalar() or 0
+            if trades_today == 0:
+                stmt = select(func.count()).select_from(TradeModel).where(
+                    TradeModel.status == "CLOSED",
+                    TradeModel.exit_time >= today_start,
+                )
+                result = await db.execute(stmt)
+                trades_today = result.scalar() or 0
+
+            if daily_pnl == 0.0:
+                pnl_stmt = select(func.sum(TradeModel.pnl)).where(
+                    TradeModel.status == "CLOSED",
+                    TradeModel.exit_time >= today_start,
+                )
+                pnl_result = await db.execute(pnl_stmt)
+                daily_pnl = pnl_result.scalar() or 0.0
 
     metrics = rm.get_metrics(
-        pe.capital, pe.peak_capital, pe.daily_pnl, trades_today
+        pe.capital, pe.peak_capital, daily_pnl, trades_today
     )
     return RiskMetrics(**metrics)
 
