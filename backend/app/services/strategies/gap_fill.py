@@ -98,7 +98,7 @@ class GapFillStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"gap_pct": gap_pct, "prior_close": prior_close},
+                metadata={"gap_pct": gap_pct, "prior_close": prior_close, "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
             )
 
         # Gap down → LONG (expect fill up to prior close)
@@ -115,7 +115,7 @@ class GapFillStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"gap_pct": gap_pct, "prior_close": prior_close},
+                metadata={"gap_pct": gap_pct, "prior_close": prior_close, "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
             )
 
         return None

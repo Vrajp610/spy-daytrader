@@ -94,7 +94,7 @@ class MomentumScalperStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"fast_rsi": fast_rsi, "adx": adx},
+                metadata={"fast_rsi": fast_rsi, "adx": adx, "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
             )
 
         # SHORT: fast RSI was overbought and is now dropping
@@ -113,7 +113,7 @@ class MomentumScalperStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"fast_rsi": fast_rsi, "adx": adx},
+                metadata={"fast_rsi": fast_rsi, "adx": adx, "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
             )
 
         return None

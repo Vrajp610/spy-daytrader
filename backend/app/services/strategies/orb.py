@@ -123,7 +123,7 @@ class ORBStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width},
+                metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
             )
 
         # Breakdown below opening range
@@ -138,7 +138,7 @@ class ORBStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width},
+                metadata={"or_high": or_high, "or_low": or_low, "range_width": range_width, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
             )
 
         return None

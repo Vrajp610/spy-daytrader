@@ -106,7 +106,7 @@ class DoubleBottomTopStrategy(BaseStrategy):
                             take_profit=target,
                             confidence=confidence,
                             timestamp=current_time,
-                            metadata={"pattern": "double_bottom", "neckline": neckline},
+                            metadata={"pattern": "double_bottom", "neckline": neckline, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                         )
 
         # Double top: two swing highs within tolerance, then breakdown below neckline
@@ -134,7 +134,7 @@ class DoubleBottomTopStrategy(BaseStrategy):
                             take_profit=target,
                             confidence=confidence,
                             timestamp=current_time,
-                            metadata={"pattern": "double_top", "neckline": neckline},
+                            metadata={"pattern": "double_top", "neckline": neckline, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                         )
 
         return None

@@ -1,9 +1,9 @@
-"""Main async trading loop: regime detect -> strategy signal -> risk check -> execute."""
+"""Main async trading loop: regime detect -> strategy signal -> options select -> execute."""
 
 from __future__ import annotations
 import asyncio
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 from typing import Optional
 
@@ -11,10 +11,16 @@ import pandas as pd
 
 from app.config import settings
 from app.services.data_manager import DataManager
-from app.services.exit_manager import ExitManager, PositionState
-from app.services.paper_engine import PaperEngine
+from app.services.options.chain_provider import OptionChainProvider
+from app.services.options.models import (
+    OptionsStrategyType, OPTIONS_EXIT_RULES, STRATEGY_ABBREV,
+    OptionChainSnapshot,
+)
+from app.services.options.paper_options_engine import PaperOptionsEngine
+from app.services.options.selector import OptionsSelector
+from app.services.options import sizing as options_sizing
 from app.services.risk_manager import RiskManager
-from app.services.strategies.base import BaseStrategy, Direction, TradeSignal, ExitReason, MarketContext
+from app.services.strategies.base import BaseStrategy, Direction, TradeSignal, MarketContext
 from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
 from app.services.strategies.orb import ORBStrategy
@@ -43,14 +49,15 @@ REGIME_STRATEGY_MAP = {
 
 
 class TradingEngine:
-    """Main trading loop that runs as an async task."""
+    """Main trading loop — options-only execution."""
 
     def __init__(self):
         self.running = False
         self.mode = settings.trading_mode  # paper / live
-        self.paper_engine = PaperEngine(settings.initial_capital)
+        self.paper_engine = PaperOptionsEngine(settings.initial_capital)
         self.risk_manager = RiskManager()
-        self.exit_manager = ExitManager()
+        self.options_selector = OptionsSelector()
+        self.chain_provider = OptionChainProvider()
         self.regime_detector = RegimeDetector()
         self.data_manager = DataManager()
         self.current_regime = MarketRegime.RANGE_BOUND
@@ -74,6 +81,7 @@ class TradingEngine:
         self._task: Optional[asyncio.Task] = None
         self._last_data_fetch: Optional[datetime] = None
         self._last_extended_fetch: Optional[datetime] = None
+        self._last_chain_fetch: Optional[datetime] = None
         self._last_trading_date = None
         self._df_1min: Optional[pd.DataFrame] = None
         self._df_5min: Optional[pd.DataFrame] = None
@@ -81,13 +89,14 @@ class TradingEngine:
         self._df_30min: Optional[pd.DataFrame] = None
         self._df_1hr: Optional[pd.DataFrame] = None
         self._df_4hr: Optional[pd.DataFrame] = None
+        self._current_chain: Optional[OptionChainSnapshot] = None
 
     async def start(self):
         if self.running:
             return
         self.running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info(f"Trading engine started in {self.mode} mode")
+        logger.info(f"Trading engine started in {self.mode} mode (OPTIONS)")
         await ws_manager.broadcast("status_update", {
             "running": True, "mode": self.mode,
         })
@@ -104,9 +113,7 @@ class TradingEngine:
 
         # Close any open position at last known market price
         if self.paper_engine.position:
-            price = self.paper_engine.position.entry_price  # fallback
-            if self._df_1min is not None and not self._df_1min.empty:
-                price = float(self._df_1min.iloc[-1]["close"])
+            price = self._get_last_price() or self.paper_engine.position.entry_underlying
             trade = self.paper_engine.close_position(price, reason="bot_stopped")
             if trade:
                 self.risk_manager.record_trade_result(trade["pnl"])
@@ -162,6 +169,11 @@ class TradingEngine:
                         self._df_5min, len(self._df_5min) - 1
                     )
 
+                # Fetch option chain every 60 seconds
+                if (self._last_chain_fetch is None or
+                        (now - self._last_chain_fetch).total_seconds() >= 60):
+                    await self._fetch_chain()
+
                 # Broadcast price update
                 last_bar = self._df_1min.iloc[-1]
                 await ws_manager.broadcast("price_update", {
@@ -215,8 +227,32 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"Data fetch error: {e}")
 
+    async def _fetch_chain(self):
+        """Fetch option chain data."""
+        try:
+            price = self._get_last_price()
+            atr = 2.0
+            if self._df_1min is not None and not self._df_1min.empty:
+                atr_val = self._df_1min.iloc[-1].get("atr", 2.0)
+                if atr_val and not pd.isna(atr_val):
+                    atr = float(atr_val)
+
+            self._current_chain = await self.chain_provider.get_chain(
+                "SPY", underlying_price=price, atr=atr,
+            )
+            self._last_chain_fetch = datetime.now(ET)
+
+            if self._current_chain:
+                logger.info(
+                    f"Fetched option chain: {len(self._current_chain.calls)} calls, "
+                    f"{len(self._current_chain.puts)} puts, "
+                    f"IV rank: {self._current_chain.iv_rank:.0f}"
+                )
+        except Exception as e:
+            logger.error(f"Chain fetch error: {e}")
+
     async def _check_entries(self):
-        """Check all enabled strategies for entry signals."""
+        """Check all enabled strategies for entry signals, then map to options."""
         last_price = self._get_last_price()
         equity = self.paper_engine.total_equity(last_price)
         can_trade, reason = self.risk_manager.can_trade(
@@ -227,6 +263,10 @@ class TradingEngine:
         )
         if not can_trade:
             logger.debug(f"Cannot trade: {reason}")
+            return
+
+        if self._current_chain is None:
+            logger.debug("No option chain available, skipping entry check")
             return
 
         # Filter strategies by regime
@@ -254,6 +294,7 @@ class TradingEngine:
             if not strategy:
                 continue
 
+            signal = None
             if strat_name == "ema_crossover" and self._df_5min is not None and len(self._df_5min) > 30:
                 idx = len(self._df_5min) - 1
                 signal = strategy.generate_signal(self._df_5min, idx, now, market_context=ctx)
@@ -267,254 +308,197 @@ class TradingEngine:
                         df_5min=self._df_5min, df_15min=self._df_15min,
                         market_context=ctx,
                     )
-                else:
-                    continue
             elif self._df_1min is not None and len(self._df_1min) > 30:
                 idx = len(self._df_1min) - 1
                 signal = strategy.generate_signal(self._df_1min, idx, now, market_context=ctx)
-            else:
-                continue
 
             if signal:
                 # Apply multi-timeframe confluence scoring
                 confluence = BaseStrategy.compute_confluence_score(ctx, signal.direction)
-                confluence_weight = confluence / 100.0  # 0.0 - 1.0
-                # Blend strategy confidence with confluence (60% strategy, 40% confluence)
+                confluence_weight = confluence / 100.0
                 signal.confidence = signal.confidence * 0.6 + confluence_weight * 0.4
 
-                # R:R hard gate — require >= 2:1
-                stop_dist = abs(signal.entry_price - signal.stop_loss)
-                tp_dist = abs(signal.take_profit - signal.entry_price)
-                rr = tp_dist / stop_dist if stop_dist > 0 else 1.0
-                if rr < 2.0:
-                    continue
-
-                score = signal.confidence * min(rr, 5.0) / 5.0
+                score = signal.confidence
                 candidates.append((strat_name, signal, score))
 
         # Execute best-scored signal (filtered by minimum confidence)
         if candidates:
             min_conf = settings.min_signal_confidence
             candidates = [(s, sig, sc) for s, sig, sc in candidates if sig.confidence >= min_conf]
-        if candidates:
-            candidates.sort(key=lambda x: x[2], reverse=True)
-            strat_name, signal, score = candidates[0]
+        if not candidates:
+            return
 
-            quantity = self.risk_manager.calculate_position_size(
-                signal, self.paper_engine.capital
-            )
-            if quantity <= 0:
-                return
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        strat_name, signal, score = candidates[0]
 
-            if self.mode == "paper":
-                bar_volume = int(self._df_1min.iloc[-1]["volume"]) if self._df_1min is not None and not self._df_1min.empty else 0
-                pos = self.paper_engine.open_position(
-                    symbol="SPY",
-                    direction=signal.direction.value,
-                    quantity=quantity,
-                    price=signal.entry_price,
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit,
-                    strategy=strat_name,
-                    bar_volume=bar_volume,
-                    confidence=signal.confidence,
-                )
+        # Map signal to options order via selector
+        risk_fraction = self.risk_manager._kelly_risk_fraction()
+        risk_fraction *= max(0.3, min(signal.confidence, 1.0))
+        risk_fraction *= self.risk_manager._time_of_day_scalar()
+
+        order = self.options_selector.select(
+            signal, self.current_regime, self._current_chain,
+            self.paper_engine.capital, risk_fraction,
+        )
+        if order is None:
+            logger.debug(f"Options selector returned None for {strat_name}")
+            return
+
+        # Portfolio risk check
+        open_risk = self.paper_engine.open_risk
+        contracts = options_sizing.calculate_contracts(
+            order, self.paper_engine.capital, risk_fraction, open_risk,
+        )
+        if contracts <= 0:
+            return
+
+        # Update contract count on the order
+        for leg in order.legs:
+            leg.quantity = contracts
+        order.contracts = contracts
+        order.max_loss = (order.max_loss / max(1, order.contracts)) * contracts
+        order.max_profit = (order.max_profit / max(1, order.contracts)) * contracts
+        order.regime = self.current_regime.value
+
+        if self.mode == "paper":
+            pos = self.paper_engine.open_position(order)
+            if pos:
+                abbrev = STRATEGY_ABBREV.get(order.strategy_type, order.strategy_type.value)
+                await ws_manager.broadcast("trade_update", {
+                    "action": "OPEN",
+                    "strategy": strat_name,
+                    "direction": "LONG" if not order.is_credit else "SHORT",
+                    "option_strategy_type": order.strategy_type.value,
+                    "contracts": contracts,
+                    "net_premium": round(order.net_premium, 4),
+                    "max_loss": round(order.max_loss, 2),
+                    "max_profit": round(order.max_profit, 2),
+                    "legs": order.legs_to_json(),
+                    "regime": self.current_regime.value,
+                    "display": order.to_display_string(),
+                })
+        else:
+            # Live mode — place options order via Schwab
+            from app.services.schwab_client import schwab_client
+            result = await schwab_client.place_options_order(order)
+            if result and result.get("status") == "FILLED":
+                pos = self.paper_engine.open_position(order)
                 if pos:
-                    pos.entry_bar_count = len(self._df_1min) if self._df_1min is not None else 0
                     await ws_manager.broadcast("trade_update", {
                         "action": "OPEN",
                         "strategy": strat_name,
-                        "direction": signal.direction.value,
-                        "quantity": quantity,
-                        "price": signal.entry_price,
-                        "stop_loss": signal.stop_loss,
-                        "take_profit": signal.take_profit,
-                        "regime": self.current_regime.value,
-                    })
-            else:
-                # Live mode — use bracket orders for broker-enforced stops
-                from app.services.schwab_client import schwab_client
-                side = "BUY" if signal.direction == Direction.LONG else "SELL"
-                result = await schwab_client.place_bracket_order(
-                    "SPY", quantity, side,
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit,
-                )
-                if result and result.get("status") == "FILLED":
-                    pos = self.paper_engine.open_position(
-                        symbol="SPY",
-                        direction=signal.direction.value,
-                        quantity=quantity,
-                        price=signal.entry_price,
-                        stop_loss=signal.stop_loss,
-                        take_profit=signal.take_profit,
-                        strategy=strat_name,
-                    )
-                    if pos:
-                        pos.bracket_order_id = result.get("order_id")
-                    await ws_manager.broadcast("trade_update", {
-                        "action": "OPEN",
-                        "strategy": strat_name,
-                        "direction": signal.direction.value,
-                        "quantity": quantity,
-                        "price": signal.entry_price,
+                        "option_strategy_type": order.strategy_type.value,
+                        "contracts": contracts,
                         "live": True,
+                        "display": order.to_display_string(),
                     })
 
     async def _check_exits(self):
-        """Check if open position should be closed or scaled out."""
+        """Check options-specific exit rules."""
         pos = self.paper_engine.position
         if not pos:
             return
 
         now = datetime.now(ET)
+        current_price = self._get_last_price()
 
-        # EOD exit at 3:55 PM - use last known market price
+        if current_price <= 0:
+            return
+
+        # Update position with current underlying price
+        pos.update(current_price)
+
+        # 1. Expiration day close at 3:50 PM
+        if pos.order.primary_expiration:
+            try:
+                exp_date = datetime.strptime(pos.order.primary_expiration, "%Y-%m-%d").date()
+                if now.date() == exp_date and now.time() >= time(15, 50):
+                    await self._close_options_position(current_price, "expiration_day_close")
+                    return
+            except ValueError:
+                pass
+
+        # 2. EOD exit at 3:55 PM
         if now.time() >= time(15, 55):
-            eod_price = float(self._df_1min.iloc[-1]["close"]) if self._df_1min is not None and not self._df_1min.empty else pos.entry_price
-            await self._close_position(eod_price, "eod")
+            await self._close_options_position(current_price, "eod")
             return
 
-        strategy = self.strategies.get(pos.strategy)
-        if not strategy:
-            return
+        # 3. Strategy-specific profit/loss targets
+        exit_rules = OPTIONS_EXIT_RULES.get(pos.strategy_type, {})
+        take_profit_pct = exit_rules.get("take_profit_pct", 0.50)
+        stop_loss_pct = exit_rules.get("stop_loss_pct", 2.0)
 
-        if self._df_1min is None or self._df_1min.empty:
-            return
+        pnl = pos.unrealized_pnl()
+        max_profit = pos.order.max_profit
 
-        idx = len(self._df_1min) - 1
-        current_price = float(self._df_1min.iloc[-1]["close"])
-
-        # Update extremes
-        pos.update_extremes(
-            float(self._df_1min.iloc[-1]["high"]),
-            float(self._df_1min.iloc[-1]["low"]),
-        )
-
-        # Get ATR for exit manager
-        atr = float(self._df_1min.iloc[-1].get("atr", 0)) if "atr" in self._df_1min.columns else 0.0
-
-        # Build strategy exit signal
-        signal_proxy = TradeSignal(
-            strategy=pos.strategy,
-            direction=Direction(pos.direction),
-            entry_price=pos.entry_price,
-            stop_loss=pos.stop_loss,
-            take_profit=pos.take_profit,
-            quantity=pos.quantity,
-        )
-
-        strategy_exit = strategy.should_exit(
-            self._df_1min, idx, signal_proxy,
-            pos.entry_time, now,
-            pos.highest_since_entry, pos.lowest_since_entry,
-        )
-
-        # Build PositionState for ExitManager
-        state = PositionState(
-            direction=pos.direction,
-            entry_price=pos.entry_price,
-            quantity=pos.quantity,
-            original_quantity=pos.original_quantity,
-            scales_completed=list(pos.scales_completed),
-            effective_stop=pos.effective_stop,
-            trailing_atr_mult=pos.trailing_atr_mult,
-            highest_since_entry=pos.highest_since_entry,
-            lowest_since_entry=pos.lowest_since_entry,
-        )
-
-        # Update position tracking (trailing stop tightening, etc.)
-        if atr > 0:
-            updates = self.exit_manager.compute_position_updates(state, current_price, atr)
-            if "effective_stop" in updates:
-                pos.effective_stop = updates["effective_stop"]
-                state.effective_stop = updates["effective_stop"]
-            if "trailing_atr_mult" in updates:
-                pos.trailing_atr_mult = updates["trailing_atr_mult"]
-                state.trailing_atr_mult = updates["trailing_atr_mult"]
-
-        # Check exits via ExitManager
-        exit_signal = self.exit_manager.check_exit(state, current_price, atr, strategy_exit, df=self._df_1min, idx=idx)
-
-        if exit_signal:
-            if exit_signal.quantity is not None and exit_signal.quantity < pos.quantity:
-                # Partial close (scale-out)
-                await self._reduce_position(
-                    exit_signal.exit_price,
-                    exit_signal.quantity,
-                    exit_signal.reason.value,
+        if pos.is_credit:
+            # Credit spread: close at X% of max profit
+            profit_pct_of_max = pnl / max_profit if max_profit > 0 else 0
+            if profit_pct_of_max >= take_profit_pct:
+                await self._close_options_position(
+                    current_price,
+                    f"take_profit_{take_profit_pct:.0%}_max",
                 )
-                # Apply post-scale updates
-                scale_num = 1 if exit_signal.reason == ExitReason.SCALE_OUT_1 else 2
-                post_updates = self.exit_manager.get_post_scale_updates(state, scale_num, atr)
-                if "scales_completed" in post_updates:
-                    pos.scales_completed = post_updates["scales_completed"]
-                if "effective_stop" in post_updates:
-                    pos.effective_stop = post_updates["effective_stop"]
-                if "trailing_atr_mult" in post_updates:
-                    pos.trailing_atr_mult = post_updates["trailing_atr_mult"]
-            else:
-                # Full close
-                await self._close_position(exit_signal.exit_price, exit_signal.reason.value)
+                return
 
-    async def _close_position(self, price: float, reason: str):
-        """Close position in paper or live mode."""
+            # Credit spread stop: loss exceeds N x credit received
+            entry_credit = pos.entry_net_premium * pos.order.contracts * 100
+            if pnl < 0 and abs(pnl) >= entry_credit * stop_loss_pct:
+                await self._close_options_position(
+                    current_price,
+                    f"stop_loss_{stop_loss_pct:.0f}x_credit",
+                )
+                return
+        else:
+            # Debit spread / long option: close at X% gain of premium
+            entry_cost = pos.entry_net_premium * pos.order.contracts * 100
+            if entry_cost > 0:
+                gain_pct = pnl / entry_cost
+                if gain_pct >= take_profit_pct:
+                    await self._close_options_position(
+                        current_price,
+                        f"take_profit_{take_profit_pct:.0%}_premium",
+                    )
+                    return
+
+                if gain_pct <= -stop_loss_pct:
+                    await self._close_options_position(
+                        current_price,
+                        f"stop_loss_{stop_loss_pct:.0%}_premium",
+                    )
+                    return
+
+        # 4. Straddle/strangle: check individual legs
+        if pos.strategy_type in (
+            OptionsStrategyType.LONG_STRADDLE,
+            OptionsStrategyType.LONG_STRANGLE,
+        ):
+            entry_cost = pos.entry_net_premium * pos.order.contracts * 100
+            if entry_cost > 0:
+                loss_pct = -pnl / entry_cost if pnl < 0 else 0
+                total_stop = 0.30 if pos.strategy_type == OptionsStrategyType.LONG_STRADDLE else 0.35
+                if loss_pct >= total_stop:
+                    await self._close_options_position(
+                        current_price,
+                        f"stop_loss_{total_stop:.0%}_total",
+                    )
+                    return
+
+    async def _close_options_position(self, underlying_price: float, reason: str):
+        """Close the current options position."""
         if self.mode == "live":
             from app.services.schwab_client import schwab_client
-            if schwab_client.is_configured:
-                pos = self.paper_engine.position
-                if pos:
-                    # Cancel outstanding bracket children before closing
-                    bracket_id = getattr(pos, "bracket_order_id", None)
-                    if bracket_id:
-                        await schwab_client.cancel_order(bracket_id)
-                    side = "SELL" if pos.direction == "LONG" else "BUY"
-                    await schwab_client.place_order("SPY", pos.quantity, side)
+            if schwab_client.is_configured and self.paper_engine.position:
+                await schwab_client.close_options_position(
+                    self.paper_engine.position.order,
+                )
 
-        bar_volume = int(self._df_1min.iloc[-1]["volume"]) if self._df_1min is not None and not self._df_1min.empty else 0
-        current_bar_count = len(self._df_1min) if self._df_1min is not None else 0
-        trade = self.paper_engine.close_position(price, reason, bar_volume=bar_volume, current_bar_count=current_bar_count)
+        trade = self.paper_engine.close_position(underlying_price, reason)
         if trade:
             await self._persist_trade(trade)
             self.risk_manager.record_trade_result(trade["pnl"])
             await ws_manager.broadcast("trade_update", {
                 "action": "CLOSE",
-                **trade,
-            })
-
-    async def _reduce_position(self, price: float, quantity: int, reason: str):
-        """Partially close position (scale-out)."""
-        if self.mode == "live":
-            from app.services.schwab_client import schwab_client
-            if schwab_client.is_configured:
-                pos = self.paper_engine.position
-                if pos:
-                    # Cancel existing bracket children, then place partial close
-                    bracket_id = getattr(pos, "bracket_order_id", None)
-                    if bracket_id:
-                        await schwab_client.cancel_order(bracket_id)
-                    side = "SELL" if pos.direction == "LONG" else "BUY"
-                    await schwab_client.place_order("SPY", quantity, side)
-                    # Place new bracket for remaining quantity
-                    remaining = pos.quantity - quantity
-                    if remaining > 0 and pos.stop_loss and pos.take_profit:
-                        entry_side = "BUY" if pos.direction == "LONG" else "SELL"
-                        result = await schwab_client.place_bracket_order(
-                            "SPY", remaining, entry_side,
-                            stop_loss=pos.effective_stop or pos.stop_loss,
-                            take_profit=pos.take_profit,
-                        )
-                        if result and result.get("order_id"):
-                            pos.bracket_order_id = result["order_id"]
-
-        bar_volume = int(self._df_1min.iloc[-1]["volume"]) if self._df_1min is not None and not self._df_1min.empty else 0
-        current_bar_count = len(self._df_1min) if self._df_1min is not None else 0
-        trade = self.paper_engine.reduce_position(quantity, price, reason, bar_volume=bar_volume, current_bar_count=current_bar_count)
-        if trade:
-            await self._persist_trade(trade)
-            self.risk_manager.record_trade_result(trade["pnl"])
-            await ws_manager.broadcast("trade_update", {
-                "action": "PARTIAL_CLOSE",
                 **trade,
             })
 
@@ -543,11 +527,28 @@ class TradingEngine:
                     status="CLOSED",
                     confidence=trade_dict.get("confidence"),
                     slippage=trade_dict.get("slippage"),
+                    commission=trade_dict.get("commission"),
                     mae=trade_dict.get("mae"),
                     mfe=trade_dict.get("mfe"),
                     mae_pct=trade_dict.get("mae_pct"),
                     mfe_pct=trade_dict.get("mfe_pct"),
                     bars_held=trade_dict.get("bars_held"),
+                    # Options fields
+                    option_strategy_type=trade_dict.get("option_strategy_type"),
+                    contract_symbol=trade_dict.get("contract_symbol"),
+                    legs_json=trade_dict.get("legs_json"),
+                    strike=trade_dict.get("strike"),
+                    expiration_date=trade_dict.get("expiration_date"),
+                    option_type=trade_dict.get("option_type"),
+                    net_premium=trade_dict.get("net_premium"),
+                    max_loss=trade_dict.get("max_loss"),
+                    max_profit=trade_dict.get("max_profit"),
+                    entry_delta=trade_dict.get("entry_delta"),
+                    entry_theta=trade_dict.get("entry_theta"),
+                    entry_iv=trade_dict.get("entry_iv"),
+                    underlying_entry=trade_dict.get("underlying_entry"),
+                    underlying_exit=trade_dict.get("underlying_exit"),
+                    contracts=trade_dict.get("contracts"),
                 )
                 db.add(db_trade)
                 await db.commit()
@@ -559,30 +560,40 @@ class TradingEngine:
         if self._df_1min is not None and not self._df_1min.empty:
             return float(self._df_1min.iloc[-1]["close"])
         if self.paper_engine.position:
-            return self.paper_engine.position.entry_price
+            return self.paper_engine.position.entry_underlying
         return 0.0
 
     def get_status(self) -> dict:
         pos = self.paper_engine.position
         open_pos = None
         if pos:
-            # Use last known market price for unrealized P&L
-            current_price = pos.entry_price
-            if self._df_1min is not None and not self._df_1min.empty:
-                current_price = float(self._df_1min.iloc[-1]["close"])
+            current_price = self._get_last_price() or pos.entry_underlying
+            pos.update(current_price)
+            order = pos.order
+            abbrev = STRATEGY_ABBREV.get(order.strategy_type, order.strategy_type.value)
             open_pos = {
-                "symbol": pos.symbol,
-                "direction": pos.direction,
-                "quantity": pos.quantity,
-                "entry_price": pos.entry_price,
+                "symbol": "SPY",
+                "direction": "LONG" if not order.is_credit else "SHORT",
+                "quantity": order.contracts,
+                "entry_price": round(pos.entry_net_premium, 4),
                 "entry_time": pos.entry_time.isoformat(),
-                "stop_loss": pos.stop_loss,
-                "take_profit": pos.take_profit,
-                "strategy": pos.strategy,
-                "unrealized_pnl": round(pos.unrealized_pnl(current_price), 2),
-                "original_quantity": pos.original_quantity,
-                "scales_completed": list(pos.scales_completed),
-                "effective_stop": pos.effective_stop,
+                "stop_loss": 0.0,
+                "take_profit": 0.0,
+                "strategy": order.signal_strategy,
+                "unrealized_pnl": round(pos.unrealized_pnl(), 2),
+                # Options fields
+                "option_strategy_type": order.strategy_type.value,
+                "option_strategy_abbrev": abbrev,
+                "contracts": order.contracts,
+                "net_premium": round(order.net_premium, 4),
+                "max_loss": round(order.max_loss, 2),
+                "max_profit": round(order.max_profit, 2),
+                "net_delta": round(order.net_delta, 4),
+                "net_theta": round(order.net_theta, 4),
+                "legs": order.legs_to_json(),
+                "underlying_price": round(current_price, 2),
+                "expiration_date": order.primary_expiration,
+                "display": order.to_display_string(),
             }
         return {
             "running": self.running,

@@ -72,7 +72,7 @@ class VWAPReversionStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"vwap_dev": vwap_dev, "rsi": rsi},
+                metadata={"vwap_dev": vwap_dev, "rsi": rsi, "options_preference": "iron_condor", "suggested_dte": 10, "suggested_delta": 0.18},
             )
 
         # SHORT: price well above VWAP + overbought RSI + volume surge
@@ -88,7 +88,7 @@ class VWAPReversionStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"vwap_dev": vwap_dev, "rsi": rsi},
+                metadata={"vwap_dev": vwap_dev, "rsi": rsi, "options_preference": "iron_condor", "suggested_dte": 10, "suggested_delta": 0.18},
             )
 
         return None

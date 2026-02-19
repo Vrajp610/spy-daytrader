@@ -86,25 +86,36 @@ async def get_position():
     if pos is None:
         return {"position": None}
 
-    # Use last known market price for unrealized P&L
-    current_price = pos.entry_price
-    df = trading_engine._df_1min
-    if df is not None and not df.empty:
-        current_price = float(df.iloc[-1]["close"])
+    current_price = trading_engine._get_last_price() or pos.entry_underlying
+    pos.update(current_price)
+    order = pos.order
+
+    from app.services.options.models import STRATEGY_ABBREV
+    abbrev = STRATEGY_ABBREV.get(order.strategy_type, order.strategy_type.value)
 
     return {
         "position": {
-            "symbol": pos.symbol,
-            "direction": pos.direction,
-            "quantity": pos.quantity,
-            "entry_price": pos.entry_price,
+            "symbol": "SPY",
+            "direction": "LONG" if not order.is_credit else "SHORT",
+            "quantity": order.contracts,
+            "entry_price": round(pos.entry_net_premium, 4),
             "entry_time": pos.entry_time.isoformat(),
-            "stop_loss": pos.stop_loss,
-            "take_profit": pos.take_profit,
-            "strategy": pos.strategy,
-            "unrealized_pnl": round(pos.unrealized_pnl(current_price), 2),
-            "original_quantity": pos.original_quantity,
-            "scales_completed": list(pos.scales_completed),
-            "effective_stop": pos.effective_stop,
+            "stop_loss": 0.0,
+            "take_profit": 0.0,
+            "strategy": order.signal_strategy,
+            "unrealized_pnl": round(pos.unrealized_pnl(), 2),
+            # Options fields
+            "option_strategy_type": order.strategy_type.value,
+            "option_strategy_abbrev": abbrev,
+            "contracts": order.contracts,
+            "net_premium": round(order.net_premium, 4),
+            "max_loss": round(order.max_loss, 2),
+            "max_profit": round(order.max_profit, 2),
+            "net_delta": round(order.net_delta, 4),
+            "net_theta": round(order.net_theta, 4),
+            "legs": order.legs_to_json(),
+            "underlying_price": round(current_price, 2),
+            "expiration_date": order.primary_expiration,
+            "display": order.to_display_string(),
         }
     }

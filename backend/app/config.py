@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     cooldown_minutes: int = 15
     min_signal_confidence: float = 0.6
 
+    # Options settings
+    default_spread_width: float = 3.0
+    preferred_dte_min: int = 5
+    preferred_dte_max: int = 14
+    target_delta_short: float = 0.20
+    credit_profit_target_pct: float = 0.50
+    max_contracts_per_trade: int = 10
+    options_commission_per_contract: float = 0.65
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"
 

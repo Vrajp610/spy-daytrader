@@ -92,12 +92,27 @@ export default function BotControls() {
           >
             {mode.toUpperCase()}
           </button>
+          <span className="badge badge-active text-xxs">OPTIONS</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-muted text-xs">Regime</span>
           <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200">{regime}</span>
         </div>
       </div>
+
+      {/* Regime -> Options mapping */}
+      {running && (
+        <div className="mt-3 pt-2 border-t border-terminal-600/30">
+          <span className="text-muted text-xxs block mb-1">Regime Strategy</span>
+          <span className="text-xxs font-mono text-terminal-200">
+            {regime === 'TRENDING_UP' && 'Put Credit Spread / Call Debit Spread'}
+            {regime === 'TRENDING_DOWN' && 'Call Credit Spread / Put Debit Spread'}
+            {regime === 'RANGE_BOUND' && 'Iron Condor / Credit Spreads'}
+            {regime === 'VOLATILE' && 'Long Straddle / Strangle'}
+            {regime === '--' && 'Waiting for data...'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,34 @@ export interface Position {
   original_quantity?: number;
   effective_stop?: number;
   scales_completed?: number[];
+  // Options fields
+  option_strategy_type?: string;
+  option_strategy_abbrev?: string;
+  contracts?: number;
+  net_premium?: number;
+  max_loss?: number;
+  max_profit?: number;
+  net_delta?: number;
+  net_theta?: number;
+  legs?: OptionLeg[];
+  underlying_price?: number;
+  expiration_date?: string;
+  display?: string;
+}
+
+export interface OptionLeg {
+  contract_symbol: string;
+  option_type: string;
+  strike: number;
+  expiration: string;
+  action: string;
+  quantity: number;
+  premium: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  iv: number;
 }
 
 export interface Trade {
@@ -52,6 +80,22 @@ export interface Trade {
   mae_pct?: number;
   mfe_pct?: number;
   bars_held?: number;
+  // Options fields
+  option_strategy_type?: string;
+  contract_symbol?: string;
+  legs_json?: string;
+  strike?: number;
+  expiration_date?: string;
+  option_type?: string;
+  net_premium?: number;
+  max_loss?: number;
+  max_profit?: number;
+  entry_delta?: number;
+  entry_theta?: number;
+  entry_iv?: number;
+  underlying_entry?: number;
+  underlying_exit?: number;
+  contracts?: number;
 }
 
 export interface AccountInfo {
@@ -133,6 +177,13 @@ export interface TradingSettings {
   cooldown_after_consecutive_losses: number;
   cooldown_minutes: number;
   min_signal_confidence: number;
+  // Options settings
+  default_spread_width: number;
+  preferred_dte_min: number;
+  preferred_dte_max: number;
+  target_delta_short: number;
+  credit_profit_target_pct: number;
+  max_contracts_per_trade: number;
 }
 
 // ── WebSocket Message ────────────────────────────────────────────

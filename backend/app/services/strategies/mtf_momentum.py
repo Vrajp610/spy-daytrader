@@ -188,6 +188,9 @@ class MTFMomentumStrategy(BaseStrategy):
                     "confluence_score": round(confluence, 1),
                     "rsi": round(rsi, 1),
                     "vol_ratio": round(vol_ratio, 2),
+                    "options_preference": "credit_spread",
+                    "suggested_dte": 10,
+                    "suggested_delta": 0.20,
                 },
             )
 
@@ -207,6 +210,9 @@ class MTFMomentumStrategy(BaseStrategy):
                     "confluence_score": round(confluence, 1),
                     "rsi": round(rsi, 1),
                     "vol_ratio": round(vol_ratio, 2),
+                    "options_preference": "credit_spread",
+                    "suggested_dte": 10,
+                    "suggested_delta": 0.20,
                 },
             )
 

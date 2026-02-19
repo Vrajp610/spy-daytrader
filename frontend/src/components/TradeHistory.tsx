@@ -6,6 +6,18 @@ interface Props {
   total: number;
 }
 
+const TYPE_ABBREV: Record<string, string> = {
+  LONG_CALL: 'LC',
+  LONG_PUT: 'LP',
+  CALL_DEBIT_SPREAD: 'CDS',
+  CALL_CREDIT_SPREAD: 'CCS',
+  PUT_DEBIT_SPREAD: 'PDS',
+  PUT_CREDIT_SPREAD: 'PCS',
+  IRON_CONDOR: 'IC',
+  LONG_STRADDLE: 'STR',
+  LONG_STRANGLE: 'STRG',
+};
+
 type SortKey = 'entry_time' | 'pnl' | 'strategy' | 'direction';
 
 export default function TradeHistory({ trades, total }: Props) {
@@ -43,6 +55,8 @@ export default function TradeHistory({ trades, total }: Props) {
     </th>
   );
 
+  const isOptions = (t: Trade) => !!t.option_strategy_type;
+
   return (
     <div className="card p-4">
       <div className="card-header">
@@ -65,11 +79,11 @@ export default function TradeHistory({ trades, total }: Props) {
           <thead className="sticky top-0 bg-terminal-800/95 backdrop-blur-sm">
             <tr>
               <SortHeader label="Time" field="entry_time" />
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Type</th>
               <SortHeader label="Strategy" field="strategy" />
               <SortHeader label="Dir" field="direction" />
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Entry</th>
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Exit</th>
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Qty</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Premium</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Ct</th>
               <SortHeader label="P&L" field="pnl" />
               <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Reason</th>
             </tr>
@@ -87,6 +101,15 @@ export default function TradeHistory({ trades, total }: Props) {
                   <td className="font-mono text-xxs tabular-nums text-muted">
                     {new Date(t.entry_time).toLocaleString()}
                   </td>
+                  <td className="font-mono text-xxs">
+                    {isOptions(t) ? (
+                      <span className="badge badge-paper text-xxs px-1.5">
+                        {TYPE_ABBREV[t.option_strategy_type!] || t.option_strategy_type}
+                      </span>
+                    ) : (
+                      <span className="text-muted">EQ</span>
+                    )}
+                  </td>
                   <td className="text-terminal-200">
                     {t.strategy}
                     {t.confidence != null && (
@@ -101,9 +124,19 @@ export default function TradeHistory({ trades, total }: Props) {
                   <td className={`font-medium ${t.direction === 'LONG' ? 'text-profit' : 'text-loss'}`}>
                     {t.direction}
                   </td>
-                  <td className="font-mono tabular-nums">${t.entry_price.toFixed(2)}</td>
-                  <td className="font-mono tabular-nums">${t.exit_price.toFixed(2)}</td>
-                  <td className="tabular-nums">{t.quantity}</td>
+                  <td className="font-mono tabular-nums">
+                    {isOptions(t) ? (
+                      <>
+                        <span>${Math.abs(t.net_premium ?? t.entry_price).toFixed(2)}</span>
+                        <span className="text-subtle text-xxs ml-0.5">
+                          {(t.net_premium ?? 0) < 0 ? 'cr' : 'db'}
+                        </span>
+                      </>
+                    ) : (
+                      <>${t.entry_price.toFixed(2)}</>
+                    )}
+                  </td>
+                  <td className="tabular-nums">{t.contracts ?? t.quantity}</td>
                   <td className={`font-mono tabular-nums font-medium ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
                     ${t.pnl.toFixed(2)}
                   </td>
@@ -116,22 +149,66 @@ export default function TradeHistory({ trades, total }: Props) {
                   <tr key={`detail-${i}`} className="animate-fade-in !bg-terminal-700/20">
                     <td colSpan={8} className="px-4 py-3">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        {isOptions(t) && (
+                          <>
+                            <div>
+                              <span className="label">Max Loss</span>{' '}
+                              <span className="text-loss font-mono">${(t.max_loss ?? 0).toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="label">Max Profit</span>{' '}
+                              <span className="text-profit font-mono">
+                                {(t.max_profit ?? 0) > 99999 ? 'Unlim' : `$${(t.max_profit ?? 0).toFixed(2)}`}
+                              </span>
+                            </div>
+                            {t.entry_delta != null && (
+                              <div>
+                                <span className="label">Entry Delta</span>{' '}
+                                <span className="font-mono text-terminal-200">{t.entry_delta.toFixed(3)}</span>
+                              </div>
+                            )}
+                            {t.entry_iv != null && (
+                              <div>
+                                <span className="label">Entry IV</span>{' '}
+                                <span className="font-mono text-terminal-200">{(t.entry_iv * 100).toFixed(1)}%</span>
+                              </div>
+                            )}
+                            {t.underlying_entry != null && (
+                              <div>
+                                <span className="label">SPY Entry</span>{' '}
+                                <span className="font-mono text-terminal-200">${t.underlying_entry.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {t.underlying_exit != null && (
+                              <div>
+                                <span className="label">SPY Exit</span>{' '}
+                                <span className="font-mono text-terminal-200">${t.underlying_exit.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {t.strike != null && (
+                              <div>
+                                <span className="label">Strike</span>{' '}
+                                <span className="font-mono text-terminal-200">${t.strike.toFixed(0)}</span>
+                              </div>
+                            )}
+                            {t.expiration_date && (
+                              <div>
+                                <span className="label">Expiration</span>{' '}
+                                <span className="font-mono text-terminal-200">{t.expiration_date}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
                         {t.mae != null && (
                           <div>
                             <span className="label">MAE</span>{' '}
                             <span className="text-loss font-mono">${t.mae.toFixed(2)}</span>
-                            {t.mae_pct != null && (
-                              <span className="text-subtle ml-1 text-xxs">({(t.mae_pct * 100).toFixed(2)}%)</span>
-                            )}
                           </div>
                         )}
                         {t.mfe != null && (
                           <div>
                             <span className="label">MFE</span>{' '}
                             <span className="text-profit font-mono">${t.mfe.toFixed(2)}</span>
-                            {t.mfe_pct != null && (
-                              <span className="text-subtle ml-1 text-xxs">({(t.mfe_pct * 100).toFixed(2)}%)</span>
-                            )}
                           </div>
                         )}
                         {t.confidence != null && (
@@ -142,18 +219,6 @@ export default function TradeHistory({ trades, total }: Props) {
                             }`}>
                               {(t.confidence * 100).toFixed(0)}%
                             </span>
-                          </div>
-                        )}
-                        {t.slippage != null && (
-                          <div>
-                            <span className="label">Slippage</span>{' '}
-                            <span className="font-mono text-terminal-200">${t.slippage.toFixed(4)}</span>
-                          </div>
-                        )}
-                        {t.bars_held != null && (
-                          <div>
-                            <span className="label">Bars Held</span>{' '}
-                            <span className="font-mono text-terminal-200">{t.bars_held}</span>
                           </div>
                         )}
                         {t.commission != null && (

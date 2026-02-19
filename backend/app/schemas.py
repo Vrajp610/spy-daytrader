@@ -34,6 +34,22 @@ class TradeOut(BaseModel):
     mae_pct: Optional[float] = None
     mfe_pct: Optional[float] = None
     bars_held: Optional[int] = None
+    # Options fields
+    option_strategy_type: Optional[str] = None
+    contract_symbol: Optional[str] = None
+    legs_json: Optional[str] = None
+    strike: Optional[float] = None
+    expiration_date: Optional[str] = None
+    option_type: Optional[str] = None
+    net_premium: Optional[float] = None
+    max_loss: Optional[float] = None
+    max_profit: Optional[float] = None
+    entry_delta: Optional[float] = None
+    entry_theta: Optional[float] = None
+    entry_iv: Optional[float] = None
+    underlying_entry: Optional[float] = None
+    underlying_exit: Optional[float] = None
+    contracts: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -197,6 +213,13 @@ class TradingSettingsOut(BaseModel):
     cooldown_after_consecutive_losses: int
     cooldown_minutes: int
     min_signal_confidence: float
+    # Options settings
+    default_spread_width: float = 3.0
+    preferred_dte_min: int = 5
+    preferred_dte_max: int = 14
+    target_delta_short: float = 0.20
+    credit_profit_target_pct: float = 0.50
+    max_contracts_per_trade: int = 10
 
 
 class TradingSettingsUpdate(BaseModel):
@@ -209,6 +232,13 @@ class TradingSettingsUpdate(BaseModel):
     cooldown_after_consecutive_losses: Optional[int] = None
     cooldown_minutes: Optional[int] = None
     min_signal_confidence: Optional[float] = None
+    # Options settings
+    default_spread_width: Optional[float] = None
+    preferred_dte_min: Optional[int] = None
+    preferred_dte_max: Optional[int] = None
+    target_delta_short: Optional[float] = None
+    credit_profit_target_pct: Optional[float] = None
+    max_contracts_per_trade: Optional[int] = None
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

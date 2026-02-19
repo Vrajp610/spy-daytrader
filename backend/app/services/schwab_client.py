@@ -308,5 +308,131 @@ class SchwabClient:
             logger.error(f"Error getting price history: {e}")
         return None
 
+    async def get_option_chain(
+        self,
+        symbol: str = "SPY",
+        contract_type: Optional[str] = None,
+        strike_count: int = 30,
+        dte_range: Optional[tuple[int, int]] = None,
+    ) -> Optional[dict]:
+        """Fetch option chain from Schwab API."""
+        if not self._client:
+            return None
+        try:
+            kwargs = {"symbol": symbol, "strike_count": strike_count}
+            if dte_range:
+                from_date = datetime.now() + timedelta(days=dte_range[0])
+                to_date = datetime.now() + timedelta(days=dte_range[1])
+                kwargs["from_date"] = from_date
+                kwargs["to_date"] = to_date
+            resp = self._client.get_option_chain(**kwargs)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            logger.error(f"Error getting option chain: {e}")
+        return None
+
+    async def place_options_order(self, order) -> Optional[dict]:
+        """Place an options order based on OptionsOrder object.
+
+        Dispatches to the appropriate schwab-py order builder.
+        """
+        if not self._client or not self._account_hash:
+            return None
+
+        try:
+            from app.services.options.models import OptionsStrategyType, OptionAction
+
+            strategy_type = order.strategy_type
+            legs = order.legs
+
+            # Build order spec based on strategy type
+            order_spec = self._build_options_order_spec(order)
+            if order_spec is None:
+                return None
+
+            resp = self._client.place_order(self._account_hash, order_spec)
+            if resp.status_code in (200, 201):
+                order_id = resp.headers.get("Location", "").split("/")[-1]
+                logger.info(f"Options order placed: {order_id} ({order.to_display_string()})")
+                return {"order_id": order_id, "status": "FILLED"}
+            else:
+                logger.error(f"Options order failed: {resp.status_code} {resp.text}")
+                return {"order_id": None, "status": "FAILED", "error": resp.text}
+        except Exception as e:
+            logger.error(f"Error placing options order: {e}")
+            return None
+
+    def _build_options_order_spec(self, order) -> Optional[dict]:
+        """Build Schwab order spec for an options order."""
+        from app.services.options.models import OptionAction
+
+        legs_spec = []
+        for leg in order.legs:
+            instruction = "SELL_TO_OPEN" if leg.action == OptionAction.SELL_TO_OPEN else "BUY_TO_OPEN"
+            legs_spec.append({
+                "instruction": instruction,
+                "quantity": leg.quantity,
+                "instrument": {
+                    "symbol": leg.contract_symbol,
+                    "assetType": "OPTION",
+                },
+            })
+
+        price = abs(order.net_premium)
+
+        return {
+            "orderType": "NET_CREDIT" if order.is_credit else "NET_DEBIT",
+            "session": "NORMAL",
+            "duration": "DAY",
+            "price": str(round(price, 2)),
+            "complexOrderStrategyType": "VERTICAL" if len(order.legs) == 2 else "IRON_CONDOR" if len(order.legs) == 4 else "SINGLE",
+            "orderLegCollection": legs_spec,
+        }
+
+    async def close_options_position(self, order) -> Optional[dict]:
+        """Close an options position by reversing all legs."""
+        if not self._client or not self._account_hash:
+            return None
+
+        try:
+            from app.services.options.models import OptionAction
+
+            legs_spec = []
+            for leg in order.legs:
+                # Reverse the action
+                if leg.action == OptionAction.SELL_TO_OPEN:
+                    instruction = "BUY_TO_CLOSE"
+                else:
+                    instruction = "SELL_TO_CLOSE"
+                legs_spec.append({
+                    "instruction": instruction,
+                    "quantity": leg.quantity,
+                    "instrument": {
+                        "symbol": leg.contract_symbol,
+                        "assetType": "OPTION",
+                    },
+                })
+
+            close_spec = {
+                "orderType": "MARKET",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "complexOrderStrategyType": "VERTICAL" if len(order.legs) == 2 else "IRON_CONDOR" if len(order.legs) == 4 else "SINGLE",
+                "orderLegCollection": legs_spec,
+            }
+
+            resp = self._client.place_order(self._account_hash, close_spec)
+            if resp.status_code in (200, 201):
+                order_id = resp.headers.get("Location", "").split("/")[-1]
+                logger.info(f"Options close order placed: {order_id}")
+                return {"order_id": order_id, "status": "FILLED"}
+            else:
+                logger.error(f"Options close failed: {resp.status_code} {resp.text}")
+                return None
+        except Exception as e:
+            logger.error(f"Error closing options position: {e}")
+            return None
+
 
 schwab_client = SchwabClient()

@@ -103,7 +103,7 @@ class MACDReversalStrategy(BaseStrategy):
                     take_profit=target,
                     confidence=confidence,
                     timestamp=current_time,
-                    metadata={"macd_hist": macd_hist, "reversal": "bullish"},
+                    metadata={"macd_hist": macd_hist, "reversal": "bullish", "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
                 )
 
         # Bearish reversal: histogram was at extreme positive, now falling for N bars
@@ -140,7 +140,7 @@ class MACDReversalStrategy(BaseStrategy):
                     take_profit=target,
                     confidence=confidence,
                     timestamp=current_time,
-                    metadata={"macd_hist": macd_hist, "reversal": "bearish"},
+                    metadata={"macd_hist": macd_hist, "reversal": "bearish", "options_preference": "debit_spread", "suggested_dte": 7, "suggested_delta": 0.45},
                 )
 
         return None

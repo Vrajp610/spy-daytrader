@@ -90,6 +90,12 @@ async def get_trading_settings():
         cooldown_after_consecutive_losses=settings.cooldown_after_consecutive_losses,
         cooldown_minutes=settings.cooldown_minutes,
         min_signal_confidence=settings.min_signal_confidence,
+        default_spread_width=settings.default_spread_width,
+        preferred_dte_min=settings.preferred_dte_min,
+        preferred_dte_max=settings.preferred_dte_max,
+        target_delta_short=settings.target_delta_short,
+        credit_profit_target_pct=settings.credit_profit_target_pct,
+        max_contracts_per_trade=settings.max_contracts_per_trade,
     )
 
 
@@ -152,6 +158,37 @@ async def update_trading_settings(update: TradingSettingsUpdate):
             raise HTTPException(400, "Min signal confidence must be between 0% and 100%")
         settings.min_signal_confidence = update.min_signal_confidence
 
+    # Options settings
+    if update.default_spread_width is not None:
+        if not 1.0 <= update.default_spread_width <= 20.0:
+            raise HTTPException(400, "Spread width must be between $1 and $20")
+        settings.default_spread_width = update.default_spread_width
+
+    if update.preferred_dte_min is not None:
+        if not 1 <= update.preferred_dte_min <= 30:
+            raise HTTPException(400, "Min DTE must be between 1 and 30")
+        settings.preferred_dte_min = update.preferred_dte_min
+
+    if update.preferred_dte_max is not None:
+        if not 3 <= update.preferred_dte_max <= 60:
+            raise HTTPException(400, "Max DTE must be between 3 and 60")
+        settings.preferred_dte_max = update.preferred_dte_max
+
+    if update.target_delta_short is not None:
+        if not 0.05 <= update.target_delta_short <= 0.50:
+            raise HTTPException(400, "Target delta must be between 0.05 and 0.50")
+        settings.target_delta_short = update.target_delta_short
+
+    if update.credit_profit_target_pct is not None:
+        if not 0.10 <= update.credit_profit_target_pct <= 1.0:
+            raise HTTPException(400, "Credit profit target must be between 10% and 100%")
+        settings.credit_profit_target_pct = update.credit_profit_target_pct
+
+    if update.max_contracts_per_trade is not None:
+        if not 1 <= update.max_contracts_per_trade <= 100:
+            raise HTTPException(400, "Max contracts must be between 1 and 100")
+        settings.max_contracts_per_trade = update.max_contracts_per_trade
+
     # Persist to database
     async with async_session() as db:
         stmt = select(TradingConfig).where(TradingConfig.id == 1)
@@ -171,6 +208,12 @@ async def update_trading_settings(update: TradingSettingsUpdate):
         config.cooldown_after_consecutive_losses = settings.cooldown_after_consecutive_losses
         config.cooldown_minutes = settings.cooldown_minutes
         config.min_signal_confidence = settings.min_signal_confidence
+        config.default_spread_width = settings.default_spread_width
+        config.preferred_dte_min = settings.preferred_dte_min
+        config.preferred_dte_max = settings.preferred_dte_max
+        config.target_delta_short = settings.target_delta_short
+        config.credit_profit_target_pct = settings.credit_profit_target_pct
+        config.max_contracts_per_trade = settings.max_contracts_per_trade
 
         await db.commit()
 
@@ -198,6 +241,18 @@ async def load_trading_config_from_db():
             settings.cooldown_minutes = config.cooldown_minutes
             if config.min_signal_confidence is not None:
                 settings.min_signal_confidence = config.min_signal_confidence
+            if config.default_spread_width is not None:
+                settings.default_spread_width = config.default_spread_width
+            if config.preferred_dte_min is not None:
+                settings.preferred_dte_min = config.preferred_dte_min
+            if config.preferred_dte_max is not None:
+                settings.preferred_dte_max = config.preferred_dte_max
+            if config.target_delta_short is not None:
+                settings.target_delta_short = config.target_delta_short
+            if config.credit_profit_target_pct is not None:
+                settings.credit_profit_target_pct = config.credit_profit_target_pct
+            if config.max_contracts_per_trade is not None:
+                settings.max_contracts_per_trade = config.max_contracts_per_trade
 
             import logging
             logging.getLogger(__name__).info("Loaded trading config from database")

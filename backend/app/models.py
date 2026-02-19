@@ -40,6 +40,22 @@ class Trade(Base):
     mfe = Column(Float, nullable=True)
     mae_pct = Column(Float, nullable=True)
     mfe_pct = Column(Float, nullable=True)
+    # Options fields
+    option_strategy_type = Column(String, nullable=True)  # LONG_CALL, IRON_CONDOR, etc.
+    contract_symbol = Column(String, nullable=True)       # OCC symbol
+    legs_json = Column(Text, nullable=True)               # JSON array of leg details
+    strike = Column(Float, nullable=True)                 # primary strike
+    expiration_date = Column(String, nullable=True)       # YYYY-MM-DD
+    option_type = Column(String, nullable=True)           # CALL/PUT
+    net_premium = Column(Float, nullable=True)            # premium per spread
+    max_loss = Column(Float, nullable=True)               # defined risk
+    max_profit = Column(Float, nullable=True)             # defined reward
+    entry_delta = Column(Float, nullable=True)
+    entry_theta = Column(Float, nullable=True)
+    entry_iv = Column(Float, nullable=True)
+    underlying_entry = Column(Float, nullable=True)       # SPY price at entry
+    underlying_exit = Column(Float, nullable=True)        # SPY price at exit
+    contracts = Column(Integer, nullable=True)            # number of contracts
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -132,4 +148,11 @@ class TradingConfig(Base):
     cooldown_after_consecutive_losses = Column(Integer, default=3)
     cooldown_minutes = Column(Integer, default=15)
     min_signal_confidence = Column(Float, default=0.6)
+    # Options config
+    default_spread_width = Column(Float, default=3.0)
+    preferred_dte_min = Column(Integer, default=5)
+    preferred_dte_max = Column(Integer, default=14)
+    target_delta_short = Column(Float, default=0.20)
+    credit_profit_target_pct = Column(Float, default=0.50)
+    max_contracts_per_trade = Column(Integer, default=10)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

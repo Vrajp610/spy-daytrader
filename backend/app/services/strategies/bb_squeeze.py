@@ -95,7 +95,7 @@ class BBSqueezeStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
+                metadata={"bb_width": bb_width, "squeeze_threshold": threshold, "options_preference": "strangle", "suggested_dte": 7, "suggested_delta": 0.28},
             )
 
         if close < bb_lower:
@@ -109,7 +109,7 @@ class BBSqueezeStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"bb_width": bb_width, "squeeze_threshold": threshold},
+                metadata={"bb_width": bb_width, "squeeze_threshold": threshold, "options_preference": "strangle", "suggested_dte": 7, "suggested_delta": 0.28},
             )
 
         return None

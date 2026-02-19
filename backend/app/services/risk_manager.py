@@ -107,6 +107,45 @@ class RiskManager:
 
         return max(quantity, 0)
 
+    def calculate_contracts(
+        self, max_loss_per_contract: float, capital: float,
+        confidence: float = 0.7, open_risk: float = 0.0,
+    ) -> int:
+        """Calculate number of options contracts based on defined risk.
+
+        Args:
+            max_loss_per_contract: Maximum loss per contract (spread_width * 100 or premium * 100).
+            capital: Current account capital.
+            confidence: Signal confidence (0-1).
+            open_risk: Total risk of currently open positions.
+        """
+        if max_loss_per_contract <= 0 or capital <= 0:
+            return 0
+
+        risk_fraction = self._kelly_risk_fraction()
+        risk_fraction *= max(0.3, min(confidence, 1.0))
+        risk_fraction *= self._time_of_day_scalar()
+
+        risk_amount = capital * risk_fraction
+        contracts = int(risk_amount / max_loss_per_contract)
+        contracts = max(1, contracts)
+
+        # Reduce during losing streaks
+        if self.consecutive_losses > 0:
+            scale = max(0.25, 1.0 - 0.25 * self.consecutive_losses)
+            contracts = max(1, int(contracts * scale))
+
+        # Portfolio risk cap: total open risk <= max_drawdown of capital
+        portfolio_max = capital * self.max_drawdown
+        total_risk = open_risk + (max_loss_per_contract * contracts)
+        if total_risk > portfolio_max:
+            available = portfolio_max - open_risk
+            if available <= 0:
+                return 0
+            contracts = max(1, int(available / max_loss_per_contract))
+
+        return contracts
+
     def can_trade(
         self,
         capital: float,

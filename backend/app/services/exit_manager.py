@@ -322,3 +322,64 @@ class ExitManager:
         if state.direction == "LONG":
             return current_price - state.entry_price
         return state.entry_price - current_price
+
+    @staticmethod
+    def check_options_exit(
+        strategy_type: str,
+        pnl: float,
+        max_profit: float,
+        entry_premium: float,
+        contracts: int,
+    ) -> tuple[bool, str]:
+        """Check options-specific exit rules based on strategy type.
+
+        Returns (should_exit, reason) tuple.
+        """
+        from app.services.options.models import OptionsStrategyType, OPTIONS_EXIT_RULES
+
+        try:
+            st = OptionsStrategyType(strategy_type)
+        except ValueError:
+            return False, ""
+
+        rules = OPTIONS_EXIT_RULES.get(st, {})
+        tp_pct = rules.get("take_profit_pct", 0.50)
+        sl_pct = rules.get("stop_loss_pct", 2.0)
+
+        entry_cost = entry_premium * contracts * 100
+
+        # Credit strategies
+        if st in (
+            OptionsStrategyType.PUT_CREDIT_SPREAD,
+            OptionsStrategyType.CALL_CREDIT_SPREAD,
+            OptionsStrategyType.IRON_CONDOR,
+        ):
+            if max_profit > 0 and pnl >= max_profit * tp_pct:
+                return True, f"take_profit_{tp_pct:.0%}"
+            if pnl < 0 and abs(pnl) >= entry_cost * sl_pct:
+                return True, f"stop_loss_{sl_pct:.0f}x"
+
+        # Debit strategies
+        elif st in (
+            OptionsStrategyType.CALL_DEBIT_SPREAD,
+            OptionsStrategyType.PUT_DEBIT_SPREAD,
+            OptionsStrategyType.LONG_CALL,
+            OptionsStrategyType.LONG_PUT,
+        ):
+            if entry_cost > 0:
+                if pnl >= entry_cost * tp_pct:
+                    return True, f"take_profit_{tp_pct:.0%}"
+                if pnl <= -entry_cost * sl_pct:
+                    return True, f"stop_loss_{sl_pct:.0%}"
+
+        # Straddle/Strangle
+        elif st in (
+            OptionsStrategyType.LONG_STRADDLE,
+            OptionsStrategyType.LONG_STRANGLE,
+        ):
+            total_stop = 0.30 if st == OptionsStrategyType.LONG_STRADDLE else 0.35
+            if entry_cost > 0:
+                if pnl < 0 and abs(pnl) >= entry_cost * total_stop:
+                    return True, f"stop_loss_{total_stop:.0%}"
+
+        return False, ""

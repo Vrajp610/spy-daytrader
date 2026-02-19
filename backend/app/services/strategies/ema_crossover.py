@@ -81,7 +81,7 @@ class EMACrossoverStrategy(BaseStrategy):
                     take_profit=target,
                     confidence=confidence,
                     timestamp=current_time,
-                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
+                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                 )
 
         # SHORT: bearish EMA crossover
@@ -102,7 +102,7 @@ class EMACrossoverStrategy(BaseStrategy):
                     take_profit=target,
                     confidence=confidence,
                     timestamp=current_time,
-                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx},
+                    metadata={"ema9": ema9, "ema21": ema21, "rsi": rsi, "adx": adx, "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                 )
 
         return None

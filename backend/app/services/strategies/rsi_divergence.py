@@ -79,7 +79,7 @@ class RSIDivergenceStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"rsi": rsi, "divergence": "bullish"},
+                metadata={"rsi": rsi, "divergence": "bullish", "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
             )
 
         # Bearish divergence: price new high but RSI lower high
@@ -103,7 +103,7 @@ class RSIDivergenceStrategy(BaseStrategy):
                 take_profit=target,
                 confidence=confidence,
                 timestamp=current_time,
-                metadata={"rsi": rsi, "divergence": "bearish"},
+                metadata={"rsi": rsi, "divergence": "bearish", "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
             )
 
         return None

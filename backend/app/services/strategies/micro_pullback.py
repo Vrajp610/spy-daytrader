@@ -80,7 +80,7 @@ class MicroPullbackStrategy(BaseStrategy):
                         take_profit=target,
                         confidence=confidence,
                         timestamp=current_time,
-                        metadata={"adx": adx, "ema9": ema9, "pullback": "up"},
+                        metadata={"adx": adx, "ema9": ema9, "pullback": "up", "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                     )
 
         # Downtrend: EMA9 < EMA21, price pulls back up to touch EMA9, then closes below
@@ -100,7 +100,7 @@ class MicroPullbackStrategy(BaseStrategy):
                         take_profit=target,
                         confidence=confidence,
                         timestamp=current_time,
-                        metadata={"adx": adx, "ema9": ema9, "pullback": "down"},
+                        metadata={"adx": adx, "ema9": ema9, "pullback": "down", "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20},
                     )
 
         return None

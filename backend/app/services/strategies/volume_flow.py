@@ -196,6 +196,7 @@ class VolumeFlowStrategy(BaseStrategy):
                     metadata={
                         "vpoc": round(vpoc, 2), "val": round(val, 2), "vah": round(vah, 2),
                         "delta": round(delta, 3), "absorption": absorption,
+                        "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20,
                     },
                 )
 
@@ -215,6 +216,7 @@ class VolumeFlowStrategy(BaseStrategy):
                     metadata={
                         "vpoc": round(vpoc, 2), "val": round(val, 2), "vah": round(vah, 2),
                         "delta": round(delta, 3), "absorption": absorption,
+                        "options_preference": "credit_spread", "suggested_dte": 10, "suggested_delta": 0.20,
                     },
                 )
 
