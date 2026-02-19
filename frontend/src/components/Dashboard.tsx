@@ -6,6 +6,7 @@ import BotControls from './BotControls';
 import PnLCard from './PnLCard';
 import PositionCard from './PositionCard';
 import RiskMetricsCard from './RiskMetrics';
+import AlertsFeed from './AlertsFeed';
 import TradeHistory from './TradeHistory';
 import BacktestPanel from './BacktestPanel';
 import StrategyConfigPanel from './StrategyConfig';
@@ -104,6 +105,9 @@ export default function Dashboard() {
           <PositionCard />
           <RiskMetricsCard risk={risk} />
         </div>
+
+        {/* Alerts Feed */}
+        <AlertsFeed lastMessage={lastMessage} />
 
         {/* Middle: Trade History */}
         <TradeHistory trades={trades} total={total} />

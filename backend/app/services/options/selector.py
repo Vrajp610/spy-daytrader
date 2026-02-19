@@ -33,9 +33,10 @@ class OptionsSelector:
         confidence = signal.confidence
         options_pref = signal.metadata.get("options_preference")
 
-        # Determine strategy type based on confidence + regime + preference
+        # Determine strategy type based on confidence + regime + preference + IV
+        iv_rank = chain.iv_rank if chain.iv_rank is not None else 50.0
         strategy_type = self._select_strategy_type(
-            signal.direction, confidence, regime, options_pref,
+            signal.direction, confidence, regime, options_pref, iv_rank,
         )
         if strategy_type is None:
             return None
@@ -58,61 +59,79 @@ class OptionsSelector:
         confidence: float,
         regime: MarketRegime,
         preference: Optional[str],
+        iv_rank: float = 50.0,
     ) -> Optional[OptionsStrategyType]:
-        """Select options strategy type based on regime, confidence, and preference."""
+        """Select options strategy type using preference, IV rank, regime, and confidence."""
 
-        # Below minimum threshold -> no trade
-        if confidence < 0.60:
+        if confidence < 0.55:
             return None
 
-        # High confidence trending -> directional credit spread
-        if confidence >= 0.75 and regime in (MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN):
+        # Map preference string to strategy type
+        pref_map = {
+            "credit_spread": (
+                OptionsStrategyType.PUT_CREDIT_SPREAD if direction == Direction.LONG
+                else OptionsStrategyType.CALL_CREDIT_SPREAD
+            ),
+            "debit_spread": (
+                OptionsStrategyType.CALL_DEBIT_SPREAD if direction == Direction.LONG
+                else OptionsStrategyType.PUT_DEBIT_SPREAD
+            ),
+            "iron_condor": OptionsStrategyType.IRON_CONDOR,
+            "straddle": OptionsStrategyType.LONG_STRADDLE,
+            "strangle": OptionsStrategyType.LONG_STRANGLE,
+            "long_call": OptionsStrategyType.LONG_CALL,
+            "long_put": OptionsStrategyType.LONG_PUT,
+        }
+
+        # IV rank adjustments - override preference when IV conditions are extreme
+        if iv_rank > 70 and preference in ("debit_spread", "straddle", "strangle", "long_call", "long_put"):
+            # High IV: don't buy expensive premium, sell it instead
+            if regime == MarketRegime.RANGE_BOUND:
+                return OptionsStrategyType.IRON_CONDOR
             if direction == Direction.LONG:
                 return OptionsStrategyType.PUT_CREDIT_SPREAD
             return OptionsStrategyType.CALL_CREDIT_SPREAD
 
-        # Moderate confidence trending -> debit spread
-        if confidence >= 0.65 and regime in (MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN):
+        if iv_rank < 25 and preference in ("credit_spread", "iron_condor"):
+            # Low IV: premium too cheap to sell, buy it instead
+            if regime == MarketRegime.VOLATILE:
+                return OptionsStrategyType.LONG_STRADDLE if confidence >= 0.75 else OptionsStrategyType.LONG_STRANGLE
             if direction == Direction.LONG:
                 return OptionsStrategyType.CALL_DEBIT_SPREAD
             return OptionsStrategyType.PUT_DEBIT_SPREAD
 
-        # Range-bound -> iron condor
-        if confidence >= 0.60 and regime == MarketRegime.RANGE_BOUND:
-            return OptionsStrategyType.IRON_CONDOR
+        # Honor strategy preference when available
+        if preference and preference in pref_map:
+            selected = pref_map[preference]
+            return selected
 
-        # Volatile -> long straddle/strangle
-        if confidence >= 0.70 and regime == MarketRegime.VOLATILE:
-            if confidence >= 0.80:
+        # Fallback: regime + confidence based selection
+        if regime in (MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN):
+            if confidence >= 0.75:
+                return OptionsStrategyType.PUT_CREDIT_SPREAD if direction == Direction.LONG else OptionsStrategyType.CALL_CREDIT_SPREAD
+            if confidence >= 0.65:
+                return OptionsStrategyType.CALL_DEBIT_SPREAD if direction == Direction.LONG else OptionsStrategyType.PUT_DEBIT_SPREAD
+            # Lower confidence trending: naked long option for max leverage
+            return OptionsStrategyType.LONG_CALL if direction == Direction.LONG else OptionsStrategyType.LONG_PUT
+
+        if regime == MarketRegime.RANGE_BOUND:
+            if iv_rank > 40:
+                return OptionsStrategyType.IRON_CONDOR
+            # Low IV range-bound: credit spread one side
+            return OptionsStrategyType.PUT_CREDIT_SPREAD if direction == Direction.LONG else OptionsStrategyType.CALL_CREDIT_SPREAD
+
+        if regime == MarketRegime.VOLATILE:
+            if confidence >= 0.75:
                 return OptionsStrategyType.LONG_STRADDLE
-            return OptionsStrategyType.LONG_STRANGLE
+            if confidence >= 0.65:
+                return OptionsStrategyType.LONG_STRANGLE
+            # Lower confidence volatile: directional debit spread
+            return OptionsStrategyType.CALL_DEBIT_SPREAD if direction == Direction.LONG else OptionsStrategyType.PUT_DEBIT_SPREAD
 
-        # Default: credit spread in signal direction (high probability)
-        if confidence >= 0.60:
-            if direction == Direction.LONG:
-                return OptionsStrategyType.PUT_CREDIT_SPREAD
-            return OptionsStrategyType.CALL_CREDIT_SPREAD
-
-        # Honor strategy preference as override when available
-        if preference:
-            pref_map = {
-                "credit_spread": (
-                    OptionsStrategyType.PUT_CREDIT_SPREAD if direction == Direction.LONG
-                    else OptionsStrategyType.CALL_CREDIT_SPREAD
-                ),
-                "debit_spread": (
-                    OptionsStrategyType.CALL_DEBIT_SPREAD if direction == Direction.LONG
-                    else OptionsStrategyType.PUT_DEBIT_SPREAD
-                ),
-                "iron_condor": OptionsStrategyType.IRON_CONDOR,
-                "straddle": OptionsStrategyType.LONG_STRADDLE,
-                "strangle": OptionsStrategyType.LONG_STRANGLE,
-                "long_call": OptionsStrategyType.LONG_CALL,
-                "long_put": OptionsStrategyType.LONG_PUT,
-            }
-            return pref_map.get(preference)
-
-        return None
+        # Absolute fallback
+        if direction == Direction.LONG:
+            return OptionsStrategyType.PUT_CREDIT_SPREAD
+        return OptionsStrategyType.CALL_CREDIT_SPREAD
 
     def _select_expiration(
         self, chain: OptionChainSnapshot, strategy_type: OptionsStrategyType,

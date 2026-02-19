@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     daily_loss_limit: float = 0.02
     max_drawdown: float = 0.16
     max_position_pct: float = 0.30
-    max_trades_per_day: int = 10
+    max_trades_per_day: int = 100
     cooldown_after_consecutive_losses: int = 3
     cooldown_minutes: int = 15
     min_signal_confidence: float = 0.6
