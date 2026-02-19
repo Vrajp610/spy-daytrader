@@ -43,45 +43,45 @@ export default function StrategyConfigPanel() {
   };
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <h2 className="text-lg font-semibold mb-3">Strategy Config</h2>
+    <div className="card p-4">
+      <h2 className="card-title mb-3">Strategy Config</h2>
 
       <div className="space-y-2">
         {configs.map(c => (
-          <div key={c.name} className="border border-gray-800 rounded-lg">
+          <div key={c.name} className="border border-terminal-600/20 hover:border-terminal-600/40 rounded-lg transition-colors">
             <div
-              className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-800/50"
+              className="flex items-center justify-between px-3 py-2.5 cursor-pointer"
               onClick={() => setExpanded(expanded === c.name ? null : c.name)}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   onClick={e => { e.stopPropagation(); handleToggle(c.name, !c.enabled); }}
-                  className={`w-8 h-4 rounded-full transition ${
-                    c.enabled ? 'bg-green-600' : 'bg-gray-600'
-                  } relative`}
+                  className={`toggle ${c.enabled ? 'bg-profit' : 'bg-terminal-600'}`}
                 >
-                  <span className={`absolute w-3 h-3 bg-white rounded-full top-0.5 transition ${
-                    c.enabled ? 'left-4' : 'left-0.5'
-                  }`} />
+                  <span className={`toggle-knob ${c.enabled ? 'left-4' : 'left-0.5'}`} />
                 </button>
-                <span className="text-sm font-medium">{strategyLabels[c.name] ?? c.name}</span>
+                <span className="text-sm font-medium text-terminal-200">{strategyLabels[c.name] ?? c.name}</span>
               </div>
-              <span className="text-gray-500 text-xs">{expanded === c.name ? '\u25B2' : '\u25BC'}</span>
+              <span className={`text-subtle text-xs transition-transform duration-200 ${expanded === c.name ? 'rotate-180' : ''}`}>
+                {'\u25BC'}
+              </span>
             </div>
 
             {expanded === c.name && (
-              <div className="px-3 pb-3 grid grid-cols-2 gap-2">
-                {Object.entries(c.params).map(([key, val]) => (
-                  <div key={key}>
-                    <label className="text-xs text-gray-400">{key}</label>
-                    <input
-                      type="text"
-                      defaultValue={String(val)}
-                      onBlur={e => handleParamChange(c.name, key, e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm font-mono"
-                    />
-                  </div>
-                ))}
+              <div className="px-3 pb-3 border-t border-terminal-600/20 pt-3 animate-fade-in">
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(c.params).map(([key, val]) => (
+                    <div key={key}>
+                      <label className="label mb-1 block">{key}</label>
+                      <input
+                        type="text"
+                        defaultValue={String(val)}
+                        onBlur={e => handleParamChange(c.name, key, e.target.value)}
+                        className="input text-xs"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

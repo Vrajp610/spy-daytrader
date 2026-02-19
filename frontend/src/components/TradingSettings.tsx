@@ -161,44 +161,44 @@ export default function TradingSettingsPanel() {
 
   if (!settings) {
     return (
-      <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-        <h2 className="text-lg font-semibold mb-3">Trading Settings</h2>
-        <p className="text-gray-500 text-sm">Loading...</p>
+      <div className="card p-4">
+        <h2 className="card-title mb-3">Trading Settings</h2>
+        <p className="text-muted text-sm">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Trading Settings</h2>
-        <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">Paper Mode</span>
+    <div className="card p-4">
+      <div className="card-header">
+        <h2 className="card-title">Trading Settings</h2>
+        <span className="badge badge-paper">Paper Mode</span>
       </div>
 
       {error && (
-        <div className="mb-3 px-3 py-2 bg-red-900/30 border border-red-800 rounded text-red-400 text-sm">
+        <div className="mb-3 px-3 py-2 bg-loss/10 border border-loss/20 rounded-md text-loss text-sm animate-fade-in">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="mb-3 px-3 py-2 bg-green-900/30 border border-green-800 rounded text-green-400 text-sm">
+        <div className="mb-3 px-3 py-2 bg-profit/10 border border-profit/20 rounded-md text-profit text-sm animate-fade-in">
           Settings saved
         </div>
       )}
 
-      <div className="space-y-3">
-        {FIELDS.map(field => {
+      <div className="space-y-0">
+        {FIELDS.map((field, i) => {
           const isModified = editing[field.key] !== undefined;
           return (
-            <div key={field.key} className="grid grid-cols-2 gap-2 items-center">
+            <div key={field.key} className={`grid grid-cols-2 gap-2 items-center py-2.5 ${i < FIELDS.length - 1 ? 'grid-line' : ''}`}>
               <div>
-                <label className="text-sm font-medium text-gray-300">{field.label}</label>
-                <p className="text-xs text-gray-500">{field.description}</p>
+                <label className="text-sm font-medium text-terminal-200">{field.label}</label>
+                <p className="text-xxs text-subtle">{field.description}</p>
               </div>
               <div className="relative">
                 {field.type === 'currency' && (
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted font-mono text-xs">$</span>
                 )}
                 <input
                   type="number"
@@ -207,15 +207,15 @@ export default function TradingSettingsPanel() {
                   min={field.type === 'percent' ? field.min : field.min}
                   max={field.type === 'percent' ? field.max : field.max}
                   step={field.step}
-                  className={`w-full bg-gray-800 border rounded px-2 py-1.5 text-sm font-mono text-right ${
-                    isModified ? 'border-blue-500' : 'border-gray-700'
+                  className={`input text-right ${
+                    isModified ? 'border-accent/60' : ''
                   } ${field.type === 'currency' ? 'pl-6' : ''}`}
                 />
                 {field.type === 'percent' && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm">%</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted font-mono text-xs">%</span>
                 )}
                 {field.type === 'integer' && field.key === 'cooldown_minutes' && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm">min</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted font-mono text-xs">min</span>
                 )}
               </div>
             </div>
@@ -224,17 +224,17 @@ export default function TradingSettingsPanel() {
       </div>
 
       {hasChanges && (
-        <div className="flex gap-2 mt-4 pt-3 border-t border-gray-800">
+        <div className="flex gap-2 mt-4 pt-3 border-t border-terminal-600/30 animate-fade-in">
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium py-2 rounded transition"
+            className="btn-primary flex-1"
           >
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
           <button
             onClick={handleReset}
-            className="px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm py-2 rounded transition"
+            className="btn-ghost px-4"
           >
             Reset
           </button>

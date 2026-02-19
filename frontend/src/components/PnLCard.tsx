@@ -5,43 +5,45 @@ interface Props {
 }
 
 export default function PnLCard({ account }: Props) {
-  if (!account) return <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 animate-pulse h-40" />;
+  if (!account) return <div className="card skeleton h-40" />;
 
-  const dailyColor = account.daily_pnl >= 0 ? 'text-green-400' : 'text-red-400';
-  const totalColor = account.total_pnl >= 0 ? 'text-green-400' : 'text-red-400';
+  const dailyPositive = account.daily_pnl >= 0;
+  const totalPositive = account.total_pnl >= 0;
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <h2 className="text-lg font-semibold mb-3">P&L Summary</h2>
+    <div className={`card p-4 ${dailyPositive ? 'accent-left-green' : 'accent-left-red'}`}>
+      <h2 className="card-title mb-3">P&L Summary</h2>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <p className="text-xs text-gray-400 uppercase">Daily P&L</p>
-          <p className={`text-2xl font-bold ${dailyColor}`}>
+          <p className="label">Daily P&L</p>
+          <p className={`text-2xl font-mono font-bold ${dailyPositive ? 'text-profit text-glow-green' : 'text-loss text-glow-red'}`}>
             ${account.daily_pnl.toFixed(2)}
           </p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 uppercase">Total P&L</p>
-          <p className={`text-2xl font-bold ${totalColor}`}>
+          <p className="label">Total P&L</p>
+          <p className={`text-2xl font-mono font-bold ${totalPositive ? 'text-profit' : 'text-loss'}`}>
             ${account.total_pnl.toFixed(2)}
           </p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 uppercase">Equity</p>
-          <p className="text-lg font-medium">${account.equity.toLocaleString()}</p>
+          <p className="label">Equity</p>
+          <p className="data-value text-lg">${account.equity.toLocaleString()}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 uppercase">Win Rate</p>
-          <p className="text-lg font-medium">{(account.win_rate * 100).toFixed(1)}%</p>
+          <p className="label">Win Rate</p>
+          <p className="data-value text-lg">{(account.win_rate * 100).toFixed(1)}%</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 uppercase">Trades</p>
-          <p className="text-lg font-medium">{account.total_trades}</p>
+          <p className="label">Trades</p>
+          <p className="data-value text-lg">{account.total_trades}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 uppercase">Drawdown</p>
-          <p className={`text-lg font-medium ${account.drawdown_pct > 10 ? 'text-red-400' : 'text-gray-100'}`}>
+          <p className="label">Drawdown</p>
+          <p className={`data-value text-lg ${
+            account.drawdown_pct > 10 ? 'text-loss' : account.drawdown_pct > 5 ? 'text-caution' : 'text-terminal-100'
+          }`}>
             {account.drawdown_pct.toFixed(2)}%
           </p>
         </div>

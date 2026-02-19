@@ -16,12 +16,16 @@ export default function Chart({ equityCurve }: Props) {
 
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: '#111827' },
-        textColor: '#9CA3AF',
+        background: { type: ColorType.Solid, color: '#151b2e' },
+        textColor: '#6b7394',
       },
       grid: {
-        vertLines: { color: '#1F2937' },
-        horzLines: { color: '#1F2937' },
+        vertLines: { color: '#1e2640' },
+        horzLines: { color: '#1e2640' },
+      },
+      crosshair: {
+        vertLine: { color: '#448aff', style: 2, width: 1 },
+        horzLine: { color: '#448aff', style: 2, width: 1 },
       },
       width: containerRef.current.clientWidth,
       height: 300,
@@ -29,7 +33,7 @@ export default function Chart({ equityCurve }: Props) {
     });
 
     const series = chart.addLineSeries({
-      color: '#3B82F6',
+      color: '#448aff',
       lineWidth: 2,
     });
     seriesRef.current = series;
@@ -61,8 +65,8 @@ export default function Chart({ equityCurve }: Props) {
   }, [equityCurve]);
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <h2 className="text-lg font-semibold mb-3">Equity Curve</h2>
+    <div className="card p-4">
+      <h2 className="card-title mb-3">Equity Curve</h2>
       <div ref={containerRef} />
     </div>
   );

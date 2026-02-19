@@ -33,21 +33,27 @@ export default function TradeHistory({ trades, total }: Props) {
 
   const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
     <th
-      className="px-3 py-2 text-left cursor-pointer hover:text-white"
+      className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest cursor-pointer hover:text-terminal-200 transition-colors"
       onClick={() => handleSort(field)}
     >
-      {label} {sortKey === field ? (sortDesc ? '\u2193' : '\u2191') : ''}
+      {label}{' '}
+      {sortKey === field && (
+        <span className="text-accent">{sortDesc ? '\u25BC' : '\u25B2'}</span>
+      )}
     </th>
   );
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Trade History ({total})</h2>
+    <div className="card p-4">
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <h2 className="card-title">Trade History</h2>
+          <span className="badge badge-paper">{total}</span>
+        </div>
         <select
           value={filterStrategy}
           onChange={e => setFilterStrategy(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+          className="select w-auto text-xs"
         >
           <option value="">All Strategies</option>
           {strategies.map(s => <option key={s} value={s}>{s}</option>)}
@@ -55,84 +61,84 @@ export default function TradeHistory({ trades, total }: Props) {
       </div>
 
       <div className="overflow-x-auto max-h-80 overflow-y-auto">
-        <table className="w-full text-sm">
-          <thead className="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-900">
+        <table className="data-table">
+          <thead className="sticky top-0 bg-terminal-800/95 backdrop-blur-sm">
             <tr>
               <SortHeader label="Time" field="entry_time" />
               <SortHeader label="Strategy" field="strategy" />
               <SortHeader label="Dir" field="direction" />
-              <th className="px-3 py-2 text-left">Entry</th>
-              <th className="px-3 py-2 text-left">Exit</th>
-              <th className="px-3 py-2 text-left">Qty</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Entry</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Exit</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Qty</th>
               <SortHeader label="P&L" field="pnl" />
-              <th className="px-3 py-2 text-left">Reason</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Reason</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-4 text-center text-gray-500">No trades yet</td></tr>
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-muted">No trades yet</td></tr>
             ) : sorted.map((t, i) => (
               <>
                 <tr
                   key={`row-${i}`}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer"
+                  className="cursor-pointer"
                   onClick={() => setExpandedId(expandedId === (t.id ?? i) ? null : (t.id ?? i))}
                 >
-                  <td className="px-3 py-2 font-mono text-xs">
+                  <td className="font-mono text-xxs tabular-nums text-muted">
                     {new Date(t.entry_time).toLocaleString()}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="text-terminal-200">
                     {t.strategy}
                     {t.confidence != null && (
                       <span
-                        className={`inline-block w-2 h-2 rounded-full ml-2 ${
-                          t.confidence > 0.7 ? 'bg-green-400' : t.confidence >= 0.5 ? 'bg-yellow-400' : 'bg-red-400'
+                        className={`inline-block w-1.5 h-1.5 rounded-full ml-1.5 ${
+                          t.confidence > 0.7 ? 'bg-profit' : t.confidence >= 0.5 ? 'bg-caution' : 'bg-loss'
                         }`}
                         title={`Confidence: ${(t.confidence * 100).toFixed(0)}%`}
                       />
                     )}
                   </td>
-                  <td className={`px-3 py-2 font-medium ${t.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                  <td className={`font-medium ${t.direction === 'LONG' ? 'text-profit' : 'text-loss'}`}>
                     {t.direction}
                   </td>
-                  <td className="px-3 py-2 font-mono">${t.entry_price.toFixed(2)}</td>
-                  <td className="px-3 py-2 font-mono">${t.exit_price.toFixed(2)}</td>
-                  <td className="px-3 py-2">{t.quantity}</td>
-                  <td className={`px-3 py-2 font-mono font-medium ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  <td className="font-mono tabular-nums">${t.entry_price.toFixed(2)}</td>
+                  <td className="font-mono tabular-nums">${t.exit_price.toFixed(2)}</td>
+                  <td className="tabular-nums">{t.quantity}</td>
+                  <td className={`font-mono tabular-nums font-medium ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
                     ${t.pnl.toFixed(2)}
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-400">
+                  <td className="text-xxs text-muted">
                     {t.exit_reason}
-                    {t.is_partial && <span className="ml-1 text-yellow-400">(partial)</span>}
+                    {t.is_partial && <span className="ml-1 text-caution">(partial)</span>}
                   </td>
                 </tr>
                 {expandedId === (t.id ?? i) && (
-                  <tr key={`detail-${i}`} className="bg-gray-800/50">
+                  <tr key={`detail-${i}`} className="animate-fade-in !bg-terminal-700/20">
                     <td colSpan={8} className="px-4 py-3">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                         {t.mae != null && (
                           <div>
-                            <span className="text-gray-400">MAE:</span>{' '}
-                            <span className="text-red-400 font-mono">${t.mae.toFixed(2)}</span>
+                            <span className="label">MAE</span>{' '}
+                            <span className="text-loss font-mono">${t.mae.toFixed(2)}</span>
                             {t.mae_pct != null && (
-                              <span className="text-gray-500 ml-1">({(t.mae_pct * 100).toFixed(2)}%)</span>
+                              <span className="text-subtle ml-1 text-xxs">({(t.mae_pct * 100).toFixed(2)}%)</span>
                             )}
                           </div>
                         )}
                         {t.mfe != null && (
                           <div>
-                            <span className="text-gray-400">MFE:</span>{' '}
-                            <span className="text-green-400 font-mono">${t.mfe.toFixed(2)}</span>
+                            <span className="label">MFE</span>{' '}
+                            <span className="text-profit font-mono">${t.mfe.toFixed(2)}</span>
                             {t.mfe_pct != null && (
-                              <span className="text-gray-500 ml-1">({(t.mfe_pct * 100).toFixed(2)}%)</span>
+                              <span className="text-subtle ml-1 text-xxs">({(t.mfe_pct * 100).toFixed(2)}%)</span>
                             )}
                           </div>
                         )}
                         {t.confidence != null && (
                           <div>
-                            <span className="text-gray-400">Confidence:</span>{' '}
+                            <span className="label">Confidence</span>{' '}
                             <span className={`font-mono font-medium ${
-                              t.confidence > 0.7 ? 'text-green-400' : t.confidence >= 0.5 ? 'text-yellow-400' : 'text-red-400'
+                              t.confidence > 0.7 ? 'text-profit' : t.confidence >= 0.5 ? 'text-caution' : 'text-loss'
                             }`}>
                               {(t.confidence * 100).toFixed(0)}%
                             </span>
@@ -140,20 +146,20 @@ export default function TradeHistory({ trades, total }: Props) {
                         )}
                         {t.slippage != null && (
                           <div>
-                            <span className="text-gray-400">Slippage:</span>{' '}
-                            <span className="font-mono">${t.slippage.toFixed(4)}</span>
+                            <span className="label">Slippage</span>{' '}
+                            <span className="font-mono text-terminal-200">${t.slippage.toFixed(4)}</span>
                           </div>
                         )}
                         {t.bars_held != null && (
                           <div>
-                            <span className="text-gray-400">Bars Held:</span>{' '}
-                            <span className="font-mono">{t.bars_held}</span>
+                            <span className="label">Bars Held</span>{' '}
+                            <span className="font-mono text-terminal-200">{t.bars_held}</span>
                           </div>
                         )}
                         {t.commission != null && (
                           <div>
-                            <span className="text-gray-400">Commission:</span>{' '}
-                            <span className="font-mono">${t.commission.toFixed(2)}</span>
+                            <span className="label">Commission</span>{' '}
+                            <span className="font-mono text-terminal-200">${t.commission.toFixed(2)}</span>
                           </div>
                         )}
                       </div>

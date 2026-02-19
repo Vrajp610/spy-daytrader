@@ -48,12 +48,21 @@ export default function BotControls() {
   const regime = status?.current_regime ?? '--';
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Bot Controls</h2>
+    <div className={`card p-4 ${running ? 'accent-left-green' : 'accent-left-red'}`}>
+      <div className="card-header">
+        <h2 className="card-title">Bot Controls</h2>
         <div className="flex items-center gap-2">
-          <span className={`w-2.5 h-2.5 rounded-full ${running ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-          <span className="text-sm">{running ? 'Running' : 'Stopped'}</span>
+          {running ? (
+            <span className="badge badge-active animate-glow-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-profit" />
+              Running
+            </span>
+          ) : (
+            <span className="badge badge-live">
+              <span className="w-1.5 h-1.5 rounded-full bg-loss" />
+              Stopped
+            </span>
+          )}
         </div>
       </div>
 
@@ -61,34 +70,32 @@ export default function BotControls() {
         <button
           onClick={handleStart}
           disabled={running || loading}
-          className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium transition"
+          className="btn-success flex-1"
         >
           Start
         </button>
         <button
           onClick={handleStop}
           disabled={!running || loading}
-          className="flex-1 py-2 px-4 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium transition"
+          className="btn-danger flex-1"
         >
           Stop
         </button>
       </div>
 
       <div className="flex items-center justify-between text-sm">
-        <div>
-          <span className="text-gray-400">Mode: </span>
+        <div className="flex items-center gap-2">
+          <span className="text-muted text-xs">Mode</span>
           <button
             onClick={handleModeToggle}
-            className={`font-medium px-2 py-0.5 rounded ${
-              mode === 'paper' ? 'bg-blue-900 text-blue-300' : 'bg-red-900 text-red-300'
-            }`}
+            className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}
           >
             {mode.toUpperCase()}
           </button>
         </div>
-        <div>
-          <span className="text-gray-400">Regime: </span>
-          <span className="font-mono">{regime}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-muted text-xs">Regime</span>
+          <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200">{regime}</span>
         </div>
       </div>
     </div>
