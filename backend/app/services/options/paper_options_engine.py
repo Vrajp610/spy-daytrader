@@ -40,6 +40,9 @@ class PaperOptionPosition:
         # Spread cost simulation (5-10% of premium)
         self.spread_cost = self.entry_net_premium * 0.07
 
+        # Collateral held by broker (set by engine on open)
+        self.collateral = 0.0
+
     @property
     def strategy_type(self) -> OptionsStrategyType:
         return self.order.strategy_type
@@ -129,16 +132,36 @@ class PaperOptionsEngine:
             return None
 
         now = datetime.now(ET)
-        self.position = PaperOptionPosition(order, now)
+        pos = PaperOptionPosition(order, now)
 
-        # Deduct premium for debit positions, reserve margin for credit
-        if not order.is_credit:
+        if order.is_credit:
+            # Credit spreads: broker requires collateral = max_loss per contract
+            # max_loss = (spread_width - credit) * contracts * 100
+            collateral = order.max_loss
+            if collateral > self.capital:
+                logger.warning(
+                    f"Insufficient capital for credit spread collateral: "
+                    f"need ${collateral:.0f}, have ${self.capital:.0f}"
+                )
+                return None
+            self.capital -= collateral
+            pos.collateral = collateral
+        else:
+            # Debit positions: pay the premium
             cost = abs(order.net_premium) * order.contracts * 100
-            cost += self.position.spread_cost * order.contracts * 100
+            cost += pos.spread_cost * order.contracts * 100
+            if cost > self.capital:
+                logger.warning(
+                    f"Insufficient capital for debit position: "
+                    f"need ${cost:.0f}, have ${self.capital:.0f}"
+                )
+                return None
             self.capital -= cost
+            pos.collateral = cost
 
+        self.position = pos
         display = order.to_display_string()
-        logger.info(f"Paper OPTIONS OPEN: {display}")
+        logger.info(f"Paper OPTIONS OPEN: {display} | Collateral: ${pos.collateral:.0f}")
         return self.position
 
     def close_position(
@@ -152,15 +175,10 @@ class PaperOptionsEngine:
         pos.update(underlying_price)
 
         pnl = pos.unrealized_pnl()
-        self.capital += pnl
 
-        # For credit positions, return the collateral
-        if pos.is_credit:
-            pass  # collateral was never deducted (defined-risk)
-        else:
-            # Return remaining premium value
-            remaining = pos.current_premium * pos.order.contracts * 100
-            self.capital += remaining
+        # Return collateral + P&L
+        # On open, we deducted collateral. Now return it plus/minus P&L.
+        self.capital += pos.collateral + pnl
 
         self.peak_capital = max(self.peak_capital, self.capital)
 
@@ -225,11 +243,11 @@ class PaperOptionsEngine:
         return self.capital
 
     def total_equity(self, current_price: float) -> float:
-        """Capital + unrealized P&L."""
+        """Capital + collateral + unrealized P&L."""
         if self.position is None:
             return self.capital
         self.position.update(current_price)
-        return self.capital + self.position.unrealized_pnl()
+        return self.capital + self.position.collateral + self.position.unrealized_pnl()
 
     @property
     def drawdown_pct(self) -> float:
