@@ -83,20 +83,24 @@ export default function BotControls() {
         </button>
       </div>
 
-      <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-muted text-xs">Mode</span>
-          <button
-            onClick={handleModeToggle}
-            className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}
-          >
-            {mode.toUpperCase()}
-          </button>
-          <span className="badge badge-active text-xxs">OPTIONS</span>
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-muted text-xs">Mode</span>
+            <button
+              onClick={handleModeToggle}
+              className={`badge ${mode === 'paper' ? 'badge-paper' : 'badge-live'}`}
+            >
+              {mode.toUpperCase()}
+            </button>
+            <span className="badge badge-active text-xxs">OPTIONS</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between">
           <span className="text-muted text-xs">Regime</span>
-          <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200">{regime}</span>
+          <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200 truncate max-w-[10rem]" title={regime}>
+            {regime.replace('_', ' ')}
+          </span>
         </div>
       </div>
 
