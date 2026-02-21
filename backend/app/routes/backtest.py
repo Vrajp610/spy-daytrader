@@ -6,10 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import BacktestRun
-from app.schemas import BacktestRequest, BacktestResult
+from app.schemas import BacktestRequest, BacktestResult, LongTermBacktestRequest, LongTermBacktestResult
 from app.services.backtester import Backtester
+from app.services.long_term_backtester import LongTermBacktester
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
@@ -83,3 +85,42 @@ async def get_result(run_id: int, db: AsyncSession = Depends(get_db)):
     if not run:
         raise HTTPException(404, "Backtest run not found")
     return BacktestResult.model_validate(run)
+
+
+@router.post("/long-term", response_model=LongTermBacktestResult)
+async def run_long_term_backtest(req: LongTermBacktestRequest):
+    """Run a long-term (daily bars) backtest. Results are NOT persisted to DB."""
+    if req.start_date >= req.end_date:
+        raise HTTPException(400, "start_date must be before end_date")
+
+    try:
+        bt = LongTermBacktester(
+            strategies=req.strategies,
+            initial_capital=req.initial_capital,
+            max_risk_per_trade=req.max_risk_per_trade,
+            cache_dir=settings.data_cache_dir,
+        )
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: bt.run(
+                symbol="SPY",
+                start_date=req.start_date,
+                end_date=req.end_date,
+                use_cache=True,
+            ),
+        )
+        return LongTermBacktestResult(**vars(result))
+    except Exception as e:
+        raise HTTPException(500, f"Long-term backtest failed: {str(e)}")
+
+
+@router.get("/data-cache-status")
+async def data_cache_status():
+    """List CSV files in the local data cache directory."""
+    try:
+        from app.services.historical_data import HistoricalDataManager
+        mgr = HistoricalDataManager(cache_dir=settings.data_cache_dir)
+        return {"files": mgr.list_cache_files(), "cache_dir": settings.data_cache_dir}
+    except Exception as e:
+        raise HTTPException(500, f"Cache status failed: {str(e)}")

@@ -183,14 +183,25 @@ class DataManager:
         df["rsi"] = DataManager._compute_rsi(df["close"], 14)
 
         # EMAs
-        df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
-        df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
+        df["ema9"]  = df["close"].ewm(span=9,   adjust=False).mean()
+        df["ema21"] = df["close"].ewm(span=21,  adjust=False).mean()
+        df["ema50"] = df["close"].ewm(span=50,  adjust=False).mean()
+        df["ema200"]= df["close"].ewm(span=200, adjust=False).mean()
 
         # ATR(14)
         df["atr"] = DataManager._compute_atr(df, 14)
 
-        # ADX(14)
-        df["adx"] = DataManager._compute_adx(df, 14)
+        # ADX(14) + directional indices (+DI, -DI)
+        df["adx"], df["plus_di"], df["minus_di"] = DataManager._compute_adx_full(df, 14)
+
+        # Williams %R (14)
+        roll_high = df["high"].rolling(14).max()
+        roll_low  = df["low"].rolling(14).min()
+        df["wr14"] = -100 * (roll_high - df["close"]) / (roll_high - roll_low).replace(0, np.nan)
+
+        # Keltner Channel (EMA21 ± 1.5×ATR) — used by keltner_breakout strategy
+        df["kc_upper"] = df["ema21"] + 1.5 * df["atr"]
+        df["kc_lower"] = df["ema21"] - 1.5 * df["atr"]
 
         # MACD
         ema12 = df["close"].ewm(span=12, adjust=False).mean()
@@ -246,20 +257,27 @@ class DataManager:
         return tr.ewm(span=period, adjust=False).mean()
 
     @staticmethod
-    def _compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
-        plus_dm = df["high"].diff()
+    def _compute_adx_full(df: pd.DataFrame, period: int = 14) -> tuple:
+        """Return (adx, plus_di, minus_di) as three pd.Series."""
+        plus_dm  = df["high"].diff()
         minus_dm = -df["low"].diff()
 
-        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+        plus_dm  = plus_dm.where((plus_dm > minus_dm)  & (plus_dm > 0),  0.0)
         minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
 
         atr = DataManager._compute_atr(df, period)
 
-        plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / atr.replace(0, np.nan))
+        plus_di  = 100 * (plus_dm.ewm(span=period,  adjust=False).mean() / atr.replace(0, np.nan))
         minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / atr.replace(0, np.nan))
 
-        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+        dx  = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
         adx = dx.ewm(span=period, adjust=False).mean()
+        return adx, plus_di, minus_di
+
+    @staticmethod
+    def _compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Legacy wrapper — returns ADX only."""
+        adx, _, _ = DataManager._compute_adx_full(df, period)
         return adx
 
     @staticmethod

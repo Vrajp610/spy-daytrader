@@ -162,10 +162,10 @@ class RiskManager:
                 self.circuit_breaker_active = True
                 return False, f"Circuit breaker: drawdown {drawdown:.1%} >= {self.max_drawdown:.1%}"
 
-        # Daily loss limit (logged but does not gate trading — per-trade stops handle risk)
+        # Daily loss limit — HARD gate: no new trades once limit is breached
         daily_limit = capital * self.daily_loss_limit
         if daily_pnl <= -daily_limit:
-            logger.info(f"Daily loss limit info: ${daily_pnl:.2f} <= -${daily_limit:.2f} (not blocking)")
+            return False, f"Daily loss limit: ${daily_pnl:.2f} reached (limit -${daily_limit:.2f})"
 
         # Max trades per day
         if trades_today >= self.max_trades_per_day:

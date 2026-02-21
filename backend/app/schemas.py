@@ -136,6 +136,46 @@ class BacktestResult(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Long-Term Backtest ────────────────────────────────────────────────────────
+
+class LongTermBacktestRequest(BaseModel):
+    start_date: str = "2010-01-01"
+    end_date: str = "2024-12-31"
+    initial_capital: float = 25000.0
+    strategies: list[str] = [
+        "vwap_reversion", "orb", "ema_crossover", "volume_flow", "mtf_momentum",
+        "rsi_divergence", "bb_squeeze", "macd_reversal", "momentum_scalper",
+        "gap_fill", "micro_pullback", "double_bottom_top",
+    ]
+    max_risk_per_trade: float = 0.015
+
+
+class YearlyReturn(BaseModel):
+    year: int
+    return_pct: float
+    trades: int
+    end_equity: float
+
+
+class LongTermBacktestResult(BaseModel):
+    cagr_pct: float
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    max_drawdown_pct: float
+    total_return_pct: float
+    win_rate: float
+    total_trades: int
+    profit_factor: float
+    avg_win: float
+    avg_loss: float
+    final_capital: float
+    years_tested: float
+    equity_curve: list[dict]
+    yearly_returns: list[dict]
+    trades: list[dict]
+
+
 # ── Strategy Config ──────────────────────────────────────────────────────────
 
 class StrategyConfigOut(BaseModel):
@@ -152,19 +192,53 @@ class StrategyConfigUpdate(BaseModel):
     params: Optional[dict] = None
 
 
+# ── Strategy Live Performance ────────────────────────────────────────────────
+
+class StrategyLiveStats(BaseModel):
+    strategy_name: str
+    live_trades: int = 0
+    live_wins: int = 0
+    live_losses: int = 0
+    live_pnl_total: float = 0.0
+    live_win_rate: float = 0.0
+    live_avg_win: float = 0.0
+    live_avg_loss: float = 0.0
+    live_profit_factor: float = 0.0
+    consecutive_live_losses: int = 0
+    auto_disabled: bool = False
+    disabled_reason: Optional[str] = None
+    disabled_at: Optional[str] = None
+    last_trade_at: Optional[str] = None
+
+
 # ── Leaderboard ─────────────────────────────────────────────────────────
 
 class StrategyRankingOut(BaseModel):
     strategy_name: str
+    # Short-term metrics
     avg_sharpe_ratio: float
     avg_profit_factor: float
     avg_win_rate: float
     avg_return_pct: float
     avg_max_drawdown_pct: float
-    composite_score: float
+    st_composite_score: float = 0.0
     total_backtest_trades: int
     backtest_count: int
     computed_at: Optional[datetime] = None
+    # Long-term metrics (None until first LT run)
+    lt_cagr_pct: Optional[float] = None
+    lt_sharpe: Optional[float] = None
+    lt_sortino: Optional[float] = None
+    lt_calmar: Optional[float] = None
+    lt_max_drawdown_pct: Optional[float] = None
+    lt_win_rate: Optional[float] = None
+    lt_profit_factor: Optional[float] = None
+    lt_total_trades: Optional[int] = None
+    lt_years_tested: Optional[float] = None
+    lt_composite_score: Optional[float] = None
+    lt_computed_at: Optional[datetime] = None
+    # Blended score (what the trading engine uses)
+    composite_score: float
 
     model_config = {"from_attributes": True}
 
@@ -172,6 +246,7 @@ class StrategyRankingOut(BaseModel):
 class LeaderboardResponse(BaseModel):
     rankings: list[StrategyRankingOut]
     progress: dict
+    lt_progress: dict = {}
 
 
 class StrategyComparisonOut(BaseModel):

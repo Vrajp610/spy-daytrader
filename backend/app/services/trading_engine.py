@@ -34,6 +34,16 @@ from app.services.strategies.momentum_scalper import MomentumScalperStrategy
 from app.services.strategies.gap_fill import GapFillStrategy
 from app.services.strategies.micro_pullback import MicroPullbackStrategy
 from app.services.strategies.double_bottom_top import DoubleBottomTopStrategy
+from app.services.strategies.adx_trend import ADXTrendStrategy
+from app.services.strategies.golden_cross import GoldenCrossStrategy
+from app.services.strategies.keltner_breakout import KeltnerBreakoutStrategy
+from app.services.strategies.williams_r import WilliamsRStrategy
+from app.services.strategies.rsi2_mean_reversion import RSI2MeanReversionStrategy
+from app.services.strategies.stoch_rsi import StochRSIStrategy
+from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
+from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
+from app.services.strategies.smart_rsi import SmartRSIStrategy
+from app.services.strategy_monitor import strategy_monitor
 from app.websocket import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -41,11 +51,29 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 
 REGIME_STRATEGY_MAP = {
-    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
-    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
-    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze", "double_bottom_top"],
-    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow", "macd_reversal", "gap_fill"],
+    MarketRegime.TRENDING_UP: [
+        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
+        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+    ],
+    MarketRegime.TRENDING_DOWN: [
+        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
+        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+    ],
+    MarketRegime.RANGE_BOUND: [
+        "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
+        "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
+        "smc_supply_demand",
+    ],
+    MarketRegime.VOLATILE: [
+        "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
+        "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
+        "stoch_rsi",
+    ],
 }
+
+# Minimum blended composite score to allow a strategy to trade
+# (prevents strategies with clearly negative expectancy from taking positions)
+MIN_COMPOSITE_SCORE_TO_TRADE = -5.0
 
 
 class TradingEngine:
@@ -63,18 +91,30 @@ class TradingEngine:
         self.current_regime = MarketRegime.RANGE_BOUND
 
         self.strategies: dict[str, BaseStrategy] = {
-            "vwap_reversion": VWAPReversionStrategy(),
-            "orb": ORBStrategy(),
-            "ema_crossover": EMACrossoverStrategy(),
-            "volume_flow": VolumeFlowStrategy(),
-            "mtf_momentum": MTFMomentumStrategy(),
-            "rsi_divergence": RSIDivergenceStrategy(),
-            "bb_squeeze": BBSqueezeStrategy(),
-            "macd_reversal": MACDReversalStrategy(),
-            "momentum_scalper": MomentumScalperStrategy(),
-            "gap_fill": GapFillStrategy(),
-            "micro_pullback": MicroPullbackStrategy(),
-            "double_bottom_top": DoubleBottomTopStrategy(),
+            # Original 12
+            "vwap_reversion":      VWAPReversionStrategy(),
+            "orb":                 ORBStrategy(),
+            "ema_crossover":       EMACrossoverStrategy(),
+            "volume_flow":         VolumeFlowStrategy(),
+            "mtf_momentum":        MTFMomentumStrategy(),
+            "rsi_divergence":      RSIDivergenceStrategy(),
+            "bb_squeeze":          BBSqueezeStrategy(),
+            "macd_reversal":       MACDReversalStrategy(),
+            "momentum_scalper":    MomentumScalperStrategy(),
+            "gap_fill":            GapFillStrategy(),
+            "micro_pullback":      MicroPullbackStrategy(),
+            "double_bottom_top":   DoubleBottomTopStrategy(),
+            # Technical additions
+            "adx_trend":           ADXTrendStrategy(),
+            "golden_cross":        GoldenCrossStrategy(),
+            "keltner_breakout":    KeltnerBreakoutStrategy(),
+            "williams_r":          WilliamsRStrategy(),
+            # TradingView screenshot strategies
+            "rsi2_mean_reversion": RSI2MeanReversionStrategy(),
+            "stoch_rsi":           StochRSIStrategy(),
+            "smc_supply_demand":   SMCSupplyDemandStrategy(),
+            "mtf_ma_sr":           MtfMaSRStrategy(),
+            "smart_rsi":           SmartRSIStrategy(),
         }
         self.enabled_strategies: set[str] = set(self.strategies.keys())
 
@@ -257,7 +297,9 @@ class TradingEngine:
             logger.error(f"Chain fetch error: {e}")
 
     async def _refresh_strategy_scores(self):
-        """Load strategy composite scores from leaderboard for performance weighting."""
+        """Load strategy composite scores from leaderboard for performance weighting.
+        Also checks if any auto-disabled strategies are eligible for re-enable.
+        """
         import time
         now = time.time()
         if now - self._scores_last_refresh < 300:  # refresh every 5 minutes
@@ -275,6 +317,18 @@ class TradingEngine:
                     r.strategy_name: r.composite_score
                     for r in rankings
                 }
+                # Check re-enable for any auto-disabled strategies
+                for strat_name, backtest_score in self._strategy_scores.items():
+                    reenabled = await strategy_monitor.check_and_reenable(
+                        strat_name, backtest_score, db
+                    )
+                    if reenabled:
+                        self.enabled_strategies.add(strat_name)
+                        logger.info(f"Strategy {strat_name} re-enabled by monitor")
+                        await ws_manager.broadcast("status_update", {
+                            "strategy_reenabled": strat_name
+                        })
+
             if self._strategy_scores:
                 top = sorted(self._strategy_scores.items(), key=lambda x: x[1], reverse=True)[:3]
                 logger.info(f"Strategy scores loaded: top 3 = {[(n, f'{s:.1f}') for n, s in top]}")
@@ -287,7 +341,7 @@ class TradingEngine:
         equity = self.paper_engine.total_equity(last_price)
         can_trade, reason = self.risk_manager.can_trade(
             equity,
-            self.paper_engine.peak_capital,
+            self.paper_engine.peak_equity,   # mark-to-market peak (not stale free-cash peak)
             self.paper_engine.daily_pnl,
             self.paper_engine.trades_today,
         )
@@ -299,10 +353,11 @@ class TradingEngine:
             logger.debug("No option chain available, skipping entry check")
             return
 
-        # Filter strategies by regime
+        # Filter strategies by regime AND auto-disable status
         allowed = [
             s for s in self.enabled_strategies
             if s in REGIME_STRATEGY_MAP.get(self.current_regime, [])
+            and not strategy_monitor.is_auto_disabled(s)
         ]
 
         # Build MarketContext for confluence scoring
@@ -358,17 +413,47 @@ class TradingEngine:
         if not candidates:
             return
 
-        # Weight by historical strategy performance from leaderboard
+        # Weight by blended backtest + live performance score from strategy_monitor
         if self._strategy_scores:
             weighted = []
             for strat_name, signal, score in candidates:
-                perf_score = self._strategy_scores.get(strat_name, 0.0)
-                # Normalize leaderboard composite_score (typically -20 to 100) to 0-1 range
-                perf_weight = max(0.0, min((perf_score + 20) / 120.0, 1.0))
-                # Blend: 60% signal quality + 40% historical performance
+                backtest_score = self._strategy_scores.get(strat_name, 0.0)
+                # Hard gate: skip strategies with clearly negative expected value
+                blended_perf = strategy_monitor.get_blended_score(strat_name, backtest_score)
+                if blended_perf < MIN_COMPOSITE_SCORE_TO_TRADE:
+                    logger.debug(
+                        f"Skipping {strat_name}: blended score {blended_perf:.1f} "
+                        f"< {MIN_COMPOSITE_SCORE_TO_TRADE} minimum"
+                    )
+                    continue
+                # Normalize blended_perf (range −20..100) to 0-1 weight
+                perf_weight = max(0.0, min((blended_perf + 20) / 120.0, 1.0))
+                # Final score: 60% signal quality + 40% blended performance
                 blended = score * 0.6 + perf_weight * 0.4
                 weighted.append((strat_name, signal, blended))
             candidates = weighted
+
+        if not candidates:
+            return
+
+        # Multi-strategy agreement bonus: if 2+ candidates agree on direction,
+        # boost the top candidate's score by 15% as signals are confirming each other
+        if len(candidates) >= 2:
+            directions = [sig.direction for _, sig, _ in candidates]
+            long_count  = directions.count("LONG")
+            short_count = directions.count("SHORT")
+            agreement = max(long_count, short_count)
+            if agreement >= 2:
+                # Sort first so we know which is the best candidate
+                candidates.sort(key=lambda x: x[2], reverse=True)
+                top_strat, top_sig, top_score = candidates[0]
+                agreement_bonus = 0.15 * (agreement - 1) / max(len(candidates) - 1, 1)
+                top_score = min(1.0, top_score * (1.0 + agreement_bonus))
+                candidates[0] = (top_strat, top_sig, top_score)
+                logger.debug(
+                    f"Agreement bonus: {agreement}/{len(candidates)} strategies agree "
+                    f"({top_sig.direction.value}) → +{agreement_bonus:.1%} for {top_strat}"
+                )
 
         candidates.sort(key=lambda x: x[2], reverse=True)
         strat_name, signal, score = candidates[0]
@@ -575,7 +660,7 @@ class TradingEngine:
                     return
 
     async def _close_options_position(self, underlying_price: float, reason: str):
-        """Close the current options position."""
+        """Close the current options position and update all performance trackers."""
         if self.mode == "live":
             from app.services.schwab_client import schwab_client
             if schwab_client.is_configured and self.paper_engine.position:
@@ -585,8 +670,32 @@ class TradingEngine:
 
         trade = self.paper_engine.close_position(underlying_price, reason)
         if trade:
+            strat_name = trade.get("strategy", "")
+            pnl = trade.get("pnl", 0.0)
+
             await self._persist_trade(trade)
-            self.risk_manager.record_trade_result(trade["pnl"])
+            self.risk_manager.record_trade_result(pnl)
+
+            # Update per-strategy live performance and persist to DB
+            if strat_name:
+                strategy_monitor.record_trade(strat_name, pnl)
+                should_disable, disable_reason = strategy_monitor.should_auto_disable(strat_name)
+                if should_disable:
+                    strategy_monitor.mark_disabled(strat_name, disable_reason)
+                    self.enabled_strategies.discard(strat_name)
+                    logger.warning(f"Auto-disabled strategy [{strat_name}]: {disable_reason}")
+                    await ws_manager.broadcast("status_update", {
+                        "strategy_auto_disabled": strat_name,
+                        "reason": disable_reason,
+                    })
+                # Fire-and-forget DB save
+                try:
+                    from app.database import async_session
+                    async with async_session() as db:
+                        await strategy_monitor.save_to_db(strat_name, db)
+                except Exception as e:
+                    logger.warning(f"Could not persist strategy monitor stats: {e}")
+
             await ws_manager.broadcast("trade_update", {
                 "action": "CLOSE",
                 **trade,
@@ -699,7 +808,7 @@ class TradingEngine:
                 else None
             ),
             "equity": round(self.paper_engine.total_equity(self._get_last_price()), 2),
-            "peak_equity": round(self.paper_engine.peak_capital, 2),
+            "peak_equity": round(self.paper_engine.peak_equity, 2),
             "drawdown_pct": round(self.paper_engine.drawdown_pct * 100, 2),
         }
 

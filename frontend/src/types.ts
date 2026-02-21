@@ -197,15 +197,30 @@ export interface WSMessage {
 
 export interface StrategyRanking {
   strategy_name: string;
+  // Short-term metrics
   avg_sharpe_ratio: number;
   avg_profit_factor: number;
   avg_win_rate: number;
   avg_return_pct: number;
   avg_max_drawdown_pct: number;
-  composite_score: number;
+  st_composite_score: number;
   total_backtest_trades: number;
   backtest_count: number;
   computed_at: string | null;
+  // Long-term metrics (null until first LT run)
+  lt_cagr_pct: number | null;
+  lt_sharpe: number | null;
+  lt_sortino: number | null;
+  lt_calmar: number | null;
+  lt_max_drawdown_pct: number | null;
+  lt_win_rate: number | null;
+  lt_profit_factor: number | null;
+  lt_total_trades: number | null;
+  lt_years_tested: number | null;
+  lt_composite_score: number | null;
+  lt_computed_at: string | null;
+  // Blended score (55% ST + 45% LT when LT available)
+  composite_score: number;
 }
 
 export interface LeaderboardProgress {
@@ -217,9 +232,76 @@ export interface LeaderboardProgress {
   last_run: string | null;
 }
 
+export interface LtProgress {
+  status: string;
+  current_test: string;
+  completed: number;
+  total: number;
+  errors: number;
+  last_run: string | null;
+  start_date: string;
+  end_date: string;
+}
+
 export interface LeaderboardResponse {
   rankings: StrategyRanking[];
   progress: LeaderboardProgress;
+  lt_progress: LtProgress;
+}
+
+// ── Long-Term Backtest ────────────────────────────────────────────
+
+export interface LongTermBacktestRequest {
+  start_date: string;
+  end_date: string;
+  initial_capital?: number;
+  strategies?: string[];
+  max_risk_per_trade?: number;
+}
+
+export interface YearlyReturn {
+  year: number;
+  return_pct: number;
+  trades: number;
+  end_equity: number;
+}
+
+export interface LongTermBacktestResult {
+  cagr_pct: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  max_drawdown_pct: number;
+  total_return_pct: number;
+  win_rate: number;
+  total_trades: number;
+  profit_factor: number;
+  avg_win: number;
+  avg_loss: number;
+  final_capital: number;
+  years_tested: number;
+  equity_curve: { date: string; equity: number }[];
+  yearly_returns: YearlyReturn[];
+  trades: Record<string, unknown>[];
+}
+
+// ── Strategy Live Performance ─────────────────────────────────────────
+
+export interface StrategyLiveStats {
+  strategy_name: string;
+  live_trades: number;
+  live_wins: number;
+  live_losses: number;
+  live_pnl_total: number;
+  live_win_rate: number;
+  live_avg_win: number;
+  live_avg_loss: number;
+  live_profit_factor: number;
+  consecutive_live_losses: number;
+  auto_disabled: boolean;
+  disabled_reason: string | null;
+  disabled_at: string | null;
+  last_trade_at: string | null;
 }
 
 export interface StrategyComparison {

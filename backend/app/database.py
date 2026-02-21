@@ -57,6 +57,36 @@ async def _migrate_missing_columns(conn):
             ("credit_profit_target_pct", "REAL", "0.50"),
             ("max_contracts_per_trade", "INTEGER", "10"),
         ],
+        "strategy_rankings": [
+            ("st_composite_score", "REAL", "0.0"),
+            ("lt_cagr_pct", "REAL", None),
+            ("lt_sharpe", "REAL", None),
+            ("lt_sortino", "REAL", None),
+            ("lt_calmar", "REAL", None),
+            ("lt_max_drawdown_pct", "REAL", None),
+            ("lt_win_rate", "REAL", None),
+            ("lt_profit_factor", "REAL", None),
+            ("lt_total_trades", "INTEGER", None),
+            ("lt_years_tested", "REAL", None),
+            ("lt_composite_score", "REAL", None),
+            ("lt_computed_at", "TEXT", None),
+        ],
+        # strategy_live_performance is created fresh via create_all; add columns defensively
+        "strategy_live_performance": [
+            ("live_trades", "INTEGER", "0"),
+            ("live_wins", "INTEGER", "0"),
+            ("live_losses", "INTEGER", "0"),
+            ("live_pnl_total", "REAL", "0.0"),
+            ("live_win_rate", "REAL", "0.0"),
+            ("live_avg_win", "REAL", "0.0"),
+            ("live_avg_loss", "REAL", "0.0"),
+            ("live_profit_factor", "REAL", "0.0"),
+            ("consecutive_live_losses", "INTEGER", "0"),
+            ("auto_disabled", "INTEGER", "0"),
+            ("disabled_reason", "TEXT", None),
+            ("disabled_at", "TEXT", None),
+            ("last_trade_at", "TEXT", None),
+        ],
     }
 
     for table, columns in migrations.items():

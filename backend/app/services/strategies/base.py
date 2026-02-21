@@ -186,4 +186,71 @@ class BaseStrategy(ABC):
                 if (float(macd_hist) > 0 and sign > 0) or (float(macd_hist) < 0 and sign < 0):
                     score += weight
 
+        # ── 6. RSI momentum alignment across 1hr and 4hr (8 pts) ──
+        # LONG benefits when RSI is recovering from oversold (< 50 but rising)
+        # SHORT benefits when RSI is falling from overbought (> 50 but falling)
+        for df_tf, weight in [(ctx.df_1hr, 5.0), (ctx.df_4hr, 3.0)]:
+            if df_tf is None or df_tf.empty or len(df_tf) < 3:
+                continue
+            rsi_cur = df_tf.iloc[-1].get("rsi")
+            rsi_prev = df_tf.iloc[-2].get("rsi")
+            if rsi_cur is None or rsi_prev is None:
+                continue
+            if pd.isna(rsi_cur) or pd.isna(rsi_prev):
+                continue
+            rsi_cur, rsi_prev = float(rsi_cur), float(rsi_prev)
+            rising = rsi_cur > rsi_prev
+            if sign > 0 and rising and rsi_cur < 60:   # LONG: RSI rising, not overbought
+                score += weight
+            elif sign > 0 and rsi_cur < 40:             # LONG: deeply oversold = mean reversion
+                score += weight * 0.5
+            elif sign < 0 and not rising and rsi_cur > 40:  # SHORT: RSI falling, not oversold
+                score += weight
+            elif sign < 0 and rsi_cur > 60:             # SHORT: deeply overbought
+                score += weight * 0.5
+
+        # ── 7. ADX trend strength on 1hr (6 pts) ──
+        # Strong trend (ADX > 25) confirms breakout/momentum strategies.
+        # In range (ADX < 20), mean-reversion is more reliable — penalize breakouts.
+        if ctx.df_1hr is not None and not ctx.df_1hr.empty:
+            adx = ctx.df_1hr.iloc[-1].get("adx")
+            plus_di  = ctx.df_1hr.iloc[-1].get("plus_di")
+            minus_di = ctx.df_1hr.iloc[-1].get("minus_di")
+            if adx is not None and not pd.isna(adx):
+                adx = float(adx)
+                if adx >= 25:
+                    # Trend is strong — check DI alignment
+                    if plus_di is not None and minus_di is not None:
+                        pdi, mdi = float(plus_di), float(minus_di)
+                        if (pdi > mdi and sign > 0) or (mdi > pdi and sign < 0):
+                            score += 6.0   # DI aligned with direction
+                        else:
+                            score -= 3.0   # DI counter to direction in a strong trend
+                    else:
+                        score += 3.0       # Strong trend, no DI data
+                elif adx < 20:
+                    # Range-bound — slight bonus for mean-reversion signals
+                    score += 2.0
+
+        # ── 8. Bollinger Band position (6 pts) ──
+        # LONG: price near lower band (value area), SHORT: price near upper band
+        if ctx.df_1min is not None and not ctx.df_1min.empty:
+            row_bb = ctx.df_1min.iloc[-1]
+            close   = row_bb.get("close")
+            bb_upper = row_bb.get("bb_upper")
+            bb_lower = row_bb.get("bb_lower")
+            if all(v is not None and not pd.isna(v) for v in [close, bb_upper, bb_lower]):
+                close, bb_upper, bb_lower = float(close), float(bb_upper), float(bb_lower)
+                bb_range = bb_upper - bb_lower
+                if bb_range > 0:
+                    bb_pct = (close - bb_lower) / bb_range   # 0 = lower band, 1 = upper band
+                    if sign > 0 and bb_pct <= 0.35:          # LONG near lower band
+                        score += 6.0
+                    elif sign > 0 and bb_pct >= 0.65:        # LONG near upper band: overbought
+                        score -= 3.0
+                    elif sign < 0 and bb_pct >= 0.65:        # SHORT near upper band
+                        score += 6.0
+                    elif sign < 0 and bb_pct <= 0.35:        # SHORT near lower band: oversold
+                        score -= 3.0
+
         return max(0.0, min(100.0, score))

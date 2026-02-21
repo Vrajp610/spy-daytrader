@@ -123,15 +123,55 @@ class StrategyRanking(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     strategy_name = Column(String, nullable=False, unique=True)
+
+    # Short-term (1d/5d/30d intraday) metrics
     avg_sharpe_ratio = Column(Float, default=0.0)
     avg_profit_factor = Column(Float, default=0.0)
     avg_win_rate = Column(Float, default=0.0)
     avg_return_pct = Column(Float, default=0.0)
     avg_max_drawdown_pct = Column(Float, default=0.0)
-    composite_score = Column(Float, default=0.0)
+    st_composite_score = Column(Float, default=0.0)   # pure short-term score
     total_backtest_trades = Column(Integer, default=0)
     backtest_count = Column(Integer, default=0)
     computed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Long-term (10-15Y daily) metrics — nullable until first LT run
+    lt_cagr_pct = Column(Float, nullable=True)
+    lt_sharpe = Column(Float, nullable=True)
+    lt_sortino = Column(Float, nullable=True)
+    lt_calmar = Column(Float, nullable=True)
+    lt_max_drawdown_pct = Column(Float, nullable=True)
+    lt_win_rate = Column(Float, nullable=True)
+    lt_profit_factor = Column(Float, nullable=True)
+    lt_total_trades = Column(Integer, nullable=True)
+    lt_years_tested = Column(Float, nullable=True)
+    lt_composite_score = Column(Float, nullable=True)  # pure long-term score
+    lt_computed_at = Column(DateTime, nullable=True)
+
+    # Blended composite (55% ST + 45% LT when LT data exists, else 100% ST)
+    composite_score = Column(Float, default=0.0)
+
+
+class StrategyLivePerformance(Base):
+    """Tracks real-time paper/live trade results per strategy for adaptive blending with backtest scores."""
+    __tablename__ = "strategy_live_performance"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_name = Column(String, unique=True, nullable=False)
+    live_trades = Column(Integer, default=0)
+    live_wins = Column(Integer, default=0)
+    live_losses = Column(Integer, default=0)
+    live_pnl_total = Column(Float, default=0.0)
+    live_win_rate = Column(Float, default=0.0)
+    live_avg_win = Column(Float, default=0.0)
+    live_avg_loss = Column(Float, default=0.0)
+    live_profit_factor = Column(Float, default=0.0)
+    consecutive_live_losses = Column(Integer, default=0)
+    auto_disabled = Column(Boolean, default=False)
+    disabled_reason = Column(String, nullable=True)
+    disabled_at = Column(DateTime, nullable=True)
+    last_trade_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class TradingConfig(Base):

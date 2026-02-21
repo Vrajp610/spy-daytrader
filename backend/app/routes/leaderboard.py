@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import StrategyRanking, BacktestRun
-from app.schemas import StrategyRankingOut, LeaderboardResponse, StrategyComparisonOut
+from app.schemas import StrategyRankingOut, LeaderboardResponse, StrategyComparisonOut, StrategyLiveStats
 from app.services.auto_backtester import auto_backtester
+from app.services.strategy_monitor import strategy_monitor
 
 router = APIRouter(prefix="/api/leaderboard", tags=["leaderboard"])
 
@@ -18,7 +19,11 @@ async def get_rankings(db: AsyncSession = Depends(get_db)):
     stmt = select(StrategyRanking).order_by(StrategyRanking.composite_score.desc())
     result = await db.execute(stmt)
     rankings = [StrategyRankingOut.model_validate(r) for r in result.scalars().all()]
-    return LeaderboardResponse(rankings=rankings, progress=auto_backtester.progress)
+    return LeaderboardResponse(
+        rankings=rankings,
+        progress=auto_backtester.progress,
+        lt_progress=auto_backtester.lt_progress,
+    )
 
 
 @router.get("/comparison", response_model=list[StrategyComparisonOut])
@@ -83,3 +88,28 @@ async def get_progress():
 async def trigger_backtest():
     await auto_backtester.trigger()
     return {"status": "triggered", "progress": auto_backtester.progress}
+
+
+@router.post("/trigger-longterm")
+async def trigger_longterm_backtest(start_date: str = "2010-01-01", end_date: str = ""):
+    """Trigger a 15-year daily-bar backtest for all 12 strategies.
+    Results update StrategyRanking with LT metrics and re-blend composite_score (55% ST + 45% LT).
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    if not end_date:
+        end_date = _dt.now(_tz.utc).date().isoformat()
+    await auto_backtester.trigger_longterm(start_date=start_date, end_date=end_date)
+    return {"status": "triggered", "lt_progress": auto_backtester.lt_progress}
+
+
+@router.get("/lt-progress")
+async def get_lt_progress():
+    """Poll long-term backtest progress."""
+    return auto_backtester.lt_progress
+
+
+@router.get("/live-performance", response_model=list[StrategyLiveStats])
+async def get_live_performance():
+    """Per-strategy live/paper trade performance used for adaptive blending."""
+    all_stats = strategy_monitor.all_stats()
+    return [StrategyLiveStats(**v) for v in all_stats.values()]

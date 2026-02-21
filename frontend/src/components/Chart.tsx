@@ -2,8 +2,10 @@ import { useEffect, useRef } from 'react';
 import { createChart, type IChartApi, type ISeriesApi, ColorType } from 'lightweight-charts';
 import type { BacktestResult } from '../types';
 
+type EquityPoint = { timestamp?: string; date?: string; equity: number };
+
 interface Props {
-  equityCurve: BacktestResult['equity_curve'];
+  equityCurve: BacktestResult['equity_curve'] | EquityPoint[] | null;
 }
 
 export default function Chart({ equityCurve }: Props) {
@@ -55,10 +57,14 @@ export default function Chart({ equityCurve }: Props) {
   useEffect(() => {
     if (!seriesRef.current || !equityCurve?.length) return;
 
-    const data = equityCurve.map(p => ({
-      time: Math.floor(new Date(p.timestamp).getTime() / 1000) as unknown as string,
-      value: p.equity,
-    }));
+    const data = equityCurve.map(p => {
+      const pt = p as EquityPoint;
+      const ts = pt.timestamp ?? pt.date ?? '';
+      return {
+        time: Math.floor(new Date(ts).getTime() / 1000) as unknown as string,
+        value: pt.equity,
+      };
+    });
 
     seriesRef.current.setData(data as never);
     chartRef.current?.timeScale().fitContent();

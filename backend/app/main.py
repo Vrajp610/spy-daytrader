@@ -51,6 +51,13 @@ async def lifespan(app: FastAPI):
     from app.routes.settings import load_trading_config_from_db
     await load_trading_config_from_db()
 
+    # Load per-strategy live performance history from DB
+    from app.services.strategy_monitor import strategy_monitor
+    from app.database import async_session
+    async with async_session() as db:
+        await strategy_monitor.load_from_db(db)
+    logger.info("Strategy monitor loaded from DB")
+
     from app.services.auto_backtester import auto_backtester
     from app.services.trading_engine import trading_engine
 

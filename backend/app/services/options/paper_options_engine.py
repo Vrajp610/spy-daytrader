@@ -119,11 +119,14 @@ class PaperOptionsEngine:
     """Paper trading engine for options — manages portfolio of defined-risk positions."""
 
     def __init__(self, initial_capital: float = 25000.0):
-        self.capital = initial_capital
+        self.capital = initial_capital          # Free cash (collateral deducted while position open)
         self.initial_capital = initial_capital
-        self.peak_capital = initial_capital
+        self.peak_capital = initial_capital     # DEPRECATED: kept for backward compat
         self.position: Optional[PaperOptionPosition] = None
         self.closed_trades: list[dict] = []
+        # Peak total-equity tracking (mark-to-market, updated every total_equity() call)
+        self._peak_equity: float = initial_capital
+        self._last_equity: float = initial_capital
 
     def open_position(self, order: OptionsOrder) -> Optional[PaperOptionPosition]:
         """Open a new options position."""
@@ -180,7 +183,10 @@ class PaperOptionsEngine:
         # On open, we deducted collateral. Now return it plus/minus P&L.
         self.capital += pos.collateral + pnl
 
+        # Update both legacy peak_capital (free cash) and peak_equity (total)
         self.peak_capital = max(self.peak_capital, self.capital)
+        self._last_equity = self.capital          # no open position
+        self._peak_equity = max(self._peak_equity, self.capital)
 
         trade = self._build_trade_dict(pos, underlying_price, pnl, reason)
         self.closed_trades.append(trade)
@@ -240,20 +246,49 @@ class PaperOptionsEngine:
 
     @property
     def equity(self) -> float:
+        """Free cash (collateral locked while position open)."""
         return self.capital
 
-    def total_equity(self, current_price: float) -> float:
-        """Capital + collateral + unrealized P&L."""
+    @property
+    def buying_power(self) -> float:
+        """Capital available to open new positions (= free cash)."""
+        return self.capital
+
+    @property
+    def locked_collateral(self) -> float:
+        """Capital currently locked as collateral / debit cost."""
         if self.position is None:
-            return self.capital
-        self.position.update(current_price)
-        return self.capital + self.position.collateral + self.position.unrealized_pnl()
+            return 0.0
+        return self.position.collateral
+
+    @property
+    def peak_equity(self) -> float:
+        """All-time high of total mark-to-market equity."""
+        return self._peak_equity
+
+    def total_equity(self, current_price: float) -> float:
+        """
+        True mark-to-market equity = free_cash + locked_collateral + unrealized_pnl.
+
+        Also keeps peak_equity up-to-date so drawdown reflects open-position losses.
+        """
+        if self.position is None:
+            eq = self.capital
+        else:
+            self.position.update(current_price)
+            eq = self.capital + self.position.collateral + self.position.unrealized_pnl()
+
+        # Update rolling peak and cache for drawdown_pct property
+        self._peak_equity = max(self._peak_equity, eq)
+        self._last_equity = eq
+        return eq
 
     @property
     def drawdown_pct(self) -> float:
-        if self.peak_capital <= 0:
+        """Drawdown as fraction of peak equity (mark-to-market)."""
+        if self._peak_equity <= 0:
             return 0.0
-        return (self.peak_capital - self.capital) / self.peak_capital
+        return max(0.0, (self._peak_equity - self._last_equity) / self._peak_equity)
 
     @property
     def daily_pnl(self) -> float:

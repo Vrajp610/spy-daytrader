@@ -23,30 +23,64 @@ from app.services.strategies.momentum_scalper import MomentumScalperStrategy
 from app.services.strategies.gap_fill import GapFillStrategy
 from app.services.strategies.micro_pullback import MicroPullbackStrategy
 from app.services.strategies.double_bottom_top import DoubleBottomTopStrategy
+from app.services.strategies.adx_trend import ADXTrendStrategy
+from app.services.strategies.golden_cross import GoldenCrossStrategy
+from app.services.strategies.keltner_breakout import KeltnerBreakoutStrategy
+from app.services.strategies.williams_r import WilliamsRStrategy
+from app.services.strategies.rsi2_mean_reversion import RSI2MeanReversionStrategy
+from app.services.strategies.stoch_rsi import StochRSIStrategy
+from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
+from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
+from app.services.strategies.smart_rsi import SmartRSIStrategy
 
 logger = logging.getLogger(__name__)
 
 STRATEGY_MAP = {
-    "vwap_reversion": VWAPReversionStrategy,
-    "orb": ORBStrategy,
-    "ema_crossover": EMACrossoverStrategy,
-    "volume_flow": VolumeFlowStrategy,
-    "mtf_momentum": MTFMomentumStrategy,
-    "rsi_divergence": RSIDivergenceStrategy,
-    "bb_squeeze": BBSqueezeStrategy,
-    "macd_reversal": MACDReversalStrategy,
+    "vwap_reversion":   VWAPReversionStrategy,
+    "orb":              ORBStrategy,
+    "ema_crossover":    EMACrossoverStrategy,
+    "volume_flow":      VolumeFlowStrategy,
+    "mtf_momentum":     MTFMomentumStrategy,
+    "rsi_divergence":   RSIDivergenceStrategy,
+    "bb_squeeze":       BBSqueezeStrategy,
+    "macd_reversal":    MACDReversalStrategy,
     "momentum_scalper": MomentumScalperStrategy,
-    "gap_fill": GapFillStrategy,
-    "micro_pullback": MicroPullbackStrategy,
-    "double_bottom_top": DoubleBottomTopStrategy,
+    "gap_fill":         GapFillStrategy,
+    "micro_pullback":   MicroPullbackStrategy,
+    "double_bottom_top":DoubleBottomTopStrategy,
+    # Technical additions (Feb 2026)
+    "adx_trend":            ADXTrendStrategy,
+    "golden_cross":         GoldenCrossStrategy,
+    "keltner_breakout":     KeltnerBreakoutStrategy,
+    "williams_r":           WilliamsRStrategy,
+    # From user's TradingView screenshots (Feb 2026)
+    "rsi2_mean_reversion":  RSI2MeanReversionStrategy,
+    "stoch_rsi":            StochRSIStrategy,
+    "smc_supply_demand":    SMCSupplyDemandStrategy,
+    "mtf_ma_sr":            MtfMaSRStrategy,
+    "smart_rsi":            SmartRSIStrategy,
 }
 
 # Regime -> preferred strategies
 REGIME_STRATEGY_MAP = {
-    MarketRegime.TRENDING_UP: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
-    MarketRegime.TRENDING_DOWN: ["orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper"],
-    MarketRegime.RANGE_BOUND: ["vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze", "double_bottom_top"],
-    MarketRegime.VOLATILE: ["vwap_reversion", "volume_flow", "macd_reversal", "gap_fill"],
+    MarketRegime.TRENDING_UP: [
+        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
+        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+    ],
+    MarketRegime.TRENDING_DOWN: [
+        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
+        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+    ],
+    MarketRegime.RANGE_BOUND: [
+        "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
+        "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
+        "smc_supply_demand",
+    ],
+    MarketRegime.VOLATILE: [
+        "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
+        "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
+        "stoch_rsi",
+    ],
 }
 
 

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"
 
+    # Long-term backtest cache
+    data_cache_dir: str = "./data_cache"
+
     # Server
     api_host: str = "0.0.0.0"
     api_port: int = 8000
