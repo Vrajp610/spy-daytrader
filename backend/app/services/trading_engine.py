@@ -132,10 +132,72 @@ class TradingEngine:
         self._current_chain: Optional[OptionChainSnapshot] = None
         self._strategy_scores: dict[str, float] = {}
         self._scores_last_refresh: float = 0.0
+        self._state_restored: bool = False  # guard: restore equity from DB only once per process
+
+    async def _restore_paper_state(self):
+        """Restore paper engine capital from persisted trade history.
+
+        On server restart, capital would otherwise reset to initial_capital.
+        We sum all closed paper trade P&L from the DB so equity is continuous
+        across restarts.  Also loads recent trades for daily P&L tracking.
+        """
+        try:
+            from app.database import async_session
+            from app.models import Trade as TradeModel
+            from sqlalchemy import select, func
+
+            async with async_session() as db:
+                # Total realised P&L across all paper trades
+                stmt = select(func.sum(TradeModel.pnl)).where(
+                    TradeModel.is_paper.is_(True),
+                    TradeModel.status == "CLOSED",
+                    TradeModel.pnl.isnot(None),
+                )
+                result = await db.execute(stmt)
+                total_pnl = result.scalar() or 0.0
+
+                # Load last 200 closed trades for daily P&L / daily trade count
+                stmt2 = (
+                    select(TradeModel)
+                    .where(TradeModel.is_paper.is_(True), TradeModel.status == "CLOSED")
+                    .order_by(TradeModel.exit_time.desc())
+                    .limit(200)
+                )
+                result2 = await db.execute(stmt2)
+                recent_rows = result2.scalars().all()
+
+            restored_capital = self.paper_engine.initial_capital + total_pnl
+            self.paper_engine.capital = restored_capital
+            self.paper_engine._last_equity = restored_capital
+            self.paper_engine._peak_equity = max(
+                self.paper_engine.initial_capital, restored_capital
+            )
+
+            # Populate in-memory closed_trades (oldest first) for daily helpers
+            self.paper_engine.closed_trades = [
+                {
+                    "exit_time": (t.exit_time.isoformat() if t.exit_time else ""),
+                    "pnl": t.pnl or 0.0,
+                }
+                for t in reversed(recent_rows)
+            ]
+
+            logger.info(
+                f"Paper engine state restored: capital=${restored_capital:.2f} "
+                f"(initial=${self.paper_engine.initial_capital:.2f}, "
+                f"total_pnl=${total_pnl:.2f}, {len(recent_rows)} trades loaded)"
+            )
+        except Exception as e:
+            logger.error(f"Could not restore paper engine state from DB: {e}")
 
     async def start(self):
         if self.running:
             return
+        # Restore paper capital from DB on first start per process so equity
+        # never resets to $25k after a server restart.
+        if not self._state_restored:
+            await self._restore_paper_state()
+            self._state_restored = True
         self.running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info(f"Trading engine started in {self.mode} mode (OPTIONS)")
