@@ -293,6 +293,14 @@ class OptionsSelector:
 
         max_loss_per = (spread_width - credit) * 100
         max_profit_per = credit * 100
+
+        # Minimum credit gate: reject if credit is too thin relative to max loss
+        if max_profit_per < 25.0:
+            logger.debug(
+                f"Rejecting put_credit_spread: credit=${credit:.2f} too thin (max_profit=${max_profit_per:.0f})"
+            )
+            return None
+
         contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         short_leg = OptionLeg(
@@ -364,6 +372,14 @@ class OptionsSelector:
 
         max_loss_per = (spread_width - credit) * 100
         max_profit_per = credit * 100
+
+        # Minimum credit gate
+        if max_profit_per < 25.0:
+            logger.debug(
+                f"Rejecting call_credit_spread: credit=${credit:.2f} too thin (max_profit=${max_profit_per:.0f})"
+            )
+            return None
+
         contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         short_leg = OptionLeg(
@@ -434,6 +450,21 @@ class OptionsSelector:
 
         max_loss_per = debit * 100
         max_profit_per = (spread_width - debit) * 100
+
+        # Hard R:R gate: debit must not exceed half the spread width (R:R ≥ 1:1)
+        if max_profit_per < max_loss_per:
+            logger.debug(
+                f"Rejecting call_debit_spread: R:R={max_profit_per:.0f}/{max_loss_per:.0f} "
+                f"(debit=${debit:.2f}, width=${spread_width})"
+            )
+            return None
+        # Minimum profit gate: avoid trades with trivial upside
+        if max_profit_per < 50.0:
+            logger.debug(
+                f"Rejecting call_debit_spread: max_profit_per=${max_profit_per:.0f} < $50 minimum"
+            )
+            return None
+
         contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         long_leg = OptionLeg(
@@ -498,6 +529,21 @@ class OptionsSelector:
 
         max_loss_per = debit * 100
         max_profit_per = (spread_width - debit) * 100
+
+        # Hard R:R gate: debit must not exceed half the spread width (R:R ≥ 1:1)
+        if max_profit_per < max_loss_per:
+            logger.debug(
+                f"Rejecting put_debit_spread: R:R={max_profit_per:.0f}/{max_loss_per:.0f} "
+                f"(debit=${debit:.2f}, width=${spread_width})"
+            )
+            return None
+        # Minimum profit gate
+        if max_profit_per < 50.0:
+            logger.debug(
+                f"Rejecting put_debit_spread: max_profit_per=${max_profit_per:.0f} < $50 minimum"
+            )
+            return None
+
         contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         long_leg = OptionLeg(

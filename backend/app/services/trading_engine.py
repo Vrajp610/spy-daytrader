@@ -72,8 +72,8 @@ REGIME_STRATEGY_MAP = {
 }
 
 # Minimum blended composite score to allow a strategy to trade
-# (prevents strategies with clearly negative expectancy from taking positions)
-MIN_COMPOSITE_SCORE_TO_TRADE = -5.0
+# (calibrated from live losses: momentum_scalper=-6.5, adx_trend=-8.2 both lost)
+MIN_COMPOSITE_SCORE_TO_TRADE = 5.0
 
 
 class TradingEngine:
@@ -466,6 +466,19 @@ class TradingEngine:
 
                 score = signal.confidence
                 candidates.append((strat_name, signal, score))
+
+        # Hard regime-direction filter: trending regimes accept only the regime-aligned direction.
+        # This prevents e.g. LONG signals firing in TRENDING_DOWN (cause of live losses).
+        if self.current_regime == MarketRegime.TRENDING_UP:
+            pre = len(candidates)
+            candidates = [(s, sig, sc) for s, sig, sc in candidates if sig.direction == Direction.LONG]
+            if len(candidates) < pre:
+                logger.debug(f"Regime filter: dropped {pre - len(candidates)} SHORT signal(s) in TRENDING_UP")
+        elif self.current_regime == MarketRegime.TRENDING_DOWN:
+            pre = len(candidates)
+            candidates = [(s, sig, sc) for s, sig, sc in candidates if sig.direction == Direction.SHORT]
+            if len(candidates) < pre:
+                logger.debug(f"Regime filter: dropped {pre - len(candidates)} LONG signal(s) in TRENDING_DOWN")
 
         # Execute best-scored signal (filtered by minimum confidence)
         if candidates:
