@@ -49,6 +49,9 @@ export default function BotControls() {
   const dailyPnl = status?.daily_pnl ?? 0;
   const totalPnl = status?.total_pnl ?? 0;
   const equity = status?.equity ?? 0;
+  const vix = status?.vix ?? null;
+  const vixRegime = status?.vix_regime ?? null;
+  const vixTermRatio = status?.vix_term_ratio ?? null;
 
   const fmtPnl = (v: number) =>
     `${v >= 0 ? '+' : ''}$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -121,12 +124,38 @@ export default function BotControls() {
         </span>
       </div>
 
-      <div className="flex items-center justify-between py-2">
+      <div className="flex items-center justify-between grid-line py-2">
         <span className="label">Regime</span>
         <span className="font-mono text-xs bg-terminal-700/50 px-2 py-0.5 rounded text-terminal-200" title={regime}>
           {regime.replace(/_/g, ' ')}
         </span>
       </div>
+
+      {vix !== null && (
+        <div className="flex items-center justify-between py-2">
+          <span className="label">
+            VIX
+            {vixTermRatio !== null && (
+              <span className={`ml-1 text-xxs ${vixTermRatio >= 1.0 ? 'text-loss' : 'text-muted'}`}>
+                {vixTermRatio >= 1.0 ? '▲BKWD' : '▼CNTG'}
+              </span>
+            )}
+          </span>
+          <span className={`font-mono text-xs font-semibold ${
+            vixRegime === 'EXTREME_FEAR' ? 'text-loss' :
+            vixRegime === 'STRESSED' ? 'text-caution' :
+            vixRegime === 'ELEVATED' ? 'text-terminal-200' :
+            'text-profit'
+          }`} title={vixRegime ?? ''}>
+            {vix.toFixed(1)}
+            <span className="text-xxs text-muted ml-1">
+              {vixRegime === 'EXTREME_FEAR' ? '🛑' :
+               vixRegime === 'STRESSED' ? '⚠' :
+               vixRegime === 'CALM' ? '✓' : ''}
+            </span>
+          </span>
+        </div>
+      )}
 
       {running && (
         <div className="pt-2 border-t border-terminal-600/30">

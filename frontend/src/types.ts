@@ -13,6 +13,9 @@ export interface BotStatus {
   peak_equity: number;
   drawdown_pct: number;
   total_pnl: number;
+  vix?: number;
+  vix_term_ratio?: number;
+  vix_regime?: string;
 }
 
 export interface Position {

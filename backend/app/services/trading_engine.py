@@ -134,6 +134,12 @@ class TradingEngine:
         self._scores_last_refresh: float = 0.0
         self._state_restored: bool = False  # guard: restore equity from DB only once per process
 
+        # VIX macro regime inputs (fetched every 5 min via yfinance)
+        self._current_vix: float = 20.0          # VIX spot (^VIX)
+        self._current_vix3m: float = 22.0        # 3-month VIX (^VIX3M)
+        self._vix_term_ratio: float = 0.91       # VIX/VIX3M; <1=contango, >1=backwardation
+        self._vix_last_fetch: Optional[datetime] = None
+
     async def _restore_paper_state(self):
         """Restore paper engine capital from persisted trade history.
 
@@ -277,6 +283,9 @@ class TradingEngine:
                         (now - self._last_chain_fetch).total_seconds() >= 60):
                     await self._fetch_chain()
 
+                # Fetch VIX macro regime inputs (every 5 min, non-blocking)
+                await self._fetch_vix_data()
+
                 # Refresh strategy leaderboard scores
                 await self._refresh_strategy_scores()
 
@@ -357,6 +366,56 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"Chain fetch error: {e}")
 
+    async def _fetch_vix_data(self):
+        """Fetch VIX spot and VIX3M for macro regime gates (every 5 minutes).
+
+        VIX > 35          → block ALL new entries (extreme fear, signals unreliable)
+        VIX 25-35         → reduce sizes, prefer mean-reversion only
+        VIX/VIX3M > 1.0  → backwardation = stress regime, cap to 2 trades/day
+        VIX < 18          → calm/positive GEX proxy, allow momentum
+        """
+        now = datetime.now(ET)
+        if self._vix_last_fetch and (now - self._vix_last_fetch).total_seconds() < 300:
+            return  # refresh every 5 minutes
+
+        try:
+            import yfinance as yf
+            loop = asyncio.get_running_loop()
+
+            def _download():
+                vix_data = yf.download(
+                    "^VIX ^VIX3M", period="2d", interval="5m",
+                    progress=False, auto_adjust=True,
+                )
+                return vix_data
+
+            data = await loop.run_in_executor(None, _download)
+
+            if data is not None and not data.empty:
+                # Handle MultiIndex columns (ticker, field)
+                close_cols = [c for c in data.columns if c[0].lower() == "close"]
+                vix_col = next((c for c in close_cols if "VIX" in c[1] and "3M" not in c[1]), None)
+                vix3m_col = next((c for c in close_cols if "VIX3M" in c[1]), None)
+
+                if vix_col and not data[vix_col].dropna().empty:
+                    self._current_vix = float(data[vix_col].dropna().iloc[-1])
+                if vix3m_col and not data[vix3m_col].dropna().empty:
+                    self._current_vix3m = float(data[vix3m_col].dropna().iloc[-1])
+
+                if self._current_vix3m > 0:
+                    self._vix_term_ratio = self._current_vix / self._current_vix3m
+
+                self.risk_manager.set_vix(self._current_vix, self._current_vix3m)
+                self._vix_last_fetch = now
+
+                term_label = "BACKWARDATION" if self._vix_term_ratio > 1.0 else "contango"
+                logger.info(
+                    f"VIX: {self._current_vix:.1f} | VIX3M: {self._current_vix3m:.1f} | "
+                    f"ratio: {self._vix_term_ratio:.3f} ({term_label})"
+                )
+        except Exception as e:
+            logger.debug(f"VIX fetch error (non-critical): {e}")
+
     async def _refresh_strategy_scores(self):
         """Load strategy composite scores from leaderboard for performance weighting.
         Also checks if any auto-disabled strategies are eligible for re-enable.
@@ -410,14 +469,37 @@ class TradingEngine:
             logger.debug(f"Cannot trade: {reason}")
             return
 
+        # ── VIX macro gates (hedge fund: never fight extreme fear) ─────────
+        if self._current_vix >= 35.0:
+            logger.info(f"VIX={self._current_vix:.1f} ≥ 35 — all entries blocked (extreme fear)")
+            return
+
         if self._current_chain is None:
             logger.debug("No option chain available, skipping entry check")
             return
 
+        # When VIX is elevated (25-35), restrict to mean-reversion strategies only.
+        # High VIX → negative GEX environment → dealers amplify moves → momentum fails.
+        vix_stressed = self._current_vix >= 25.0
+        vix_backwardation = self._vix_term_ratio >= 1.0  # VIX > VIX3M = near-term fear spike
+
         # Filter strategies by regime AND auto-disable status
+        allowed_by_regime = REGIME_STRATEGY_MAP.get(self.current_regime, [])
+
+        # In stressed VIX environments, only allow mean-reversion strategies
+        MEAN_REVERSION_STRATEGIES = {
+            "vwap_reversion", "rsi_divergence", "bb_squeeze",
+            "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
+        }
+        if vix_stressed:
+            allowed_by_regime = [s for s in allowed_by_regime if s in MEAN_REVERSION_STRATEGIES]
+            if not allowed_by_regime:
+                logger.debug(f"VIX={self._current_vix:.1f} stressed — no mean-reversion strategies in current regime")
+                return
+
         allowed = [
             s for s in self.enabled_strategies
-            if s in REGIME_STRATEGY_MAP.get(self.current_regime, [])
+            if s in allowed_by_regime
             and not strategy_monitor.is_auto_disabled(s)
         ]
 
@@ -533,9 +615,16 @@ class TradingEngine:
         strat_name, signal, score = candidates[0]
 
         # Map signal to options order via selector
-        risk_fraction = self.risk_manager._kelly_risk_fraction()
+        risk_fraction = self.risk_manager._kelly_risk_fraction()   # already VIX-adjusted
         risk_fraction *= max(0.3, min(signal.confidence, 1.0))
         risk_fraction *= self.risk_manager._time_of_day_scalar()
+
+        # Additional VIX stress penalty: further reduce size in backwardation (near-term fear)
+        if vix_backwardation:
+            risk_fraction *= 0.6
+            logger.debug(
+                f"VIX backwardation ({self._vix_term_ratio:.2f}) — applying 0.6x size penalty"
+            )
 
         order = self.options_selector.select(
             signal, self.current_regime, self._current_chain,
@@ -751,7 +840,30 @@ class TradingEngine:
                     )
                     return
 
-        # 5. Straddle/strangle: check total position P&L
+        # 5. Delta floor exit — long options only (hedge fund: exit dying options early)
+        # When the net delta of a long position falls below 0.20, the option is far OTM.
+        # The rate of further premium decay accelerates sharply; holding is value destruction.
+        if not pos.is_credit and pos.strategy_type not in (
+            OptionsStrategyType.LONG_STRADDLE, OptionsStrategyType.LONG_STRANGLE,
+        ):
+            net_delta_per_contract = 0.0
+            for leg in pos.order.legs:
+                sign = -1.0 if "SELL" in leg.action.value else 1.0
+                net_delta_per_contract += sign * abs(leg.delta)
+            net_delta_per_contract = abs(net_delta_per_contract)
+            if 0 < net_delta_per_contract < 0.20:
+                await self._close_options_position(
+                    current_price, f"delta_floor_exit_{net_delta_per_contract:.2f}"
+                )
+                return
+
+        # 6. Theta time-stop — long options approaching expiration (hedge fund: never bleed theta)
+        # After 15:30 ET with DTE ≤ 1, theta decay is catastrophic for long options.
+        if not pos.is_credit and now.time() >= time(15, 30) and dte <= 1:
+            await self._close_options_position(current_price, "theta_time_stop_eod")
+            return
+
+        # 7. Straddle/strangle: check total position P&L
         if pos.strategy_type in (
             OptionsStrategyType.LONG_STRADDLE,
             OptionsStrategyType.LONG_STRANGLE,
@@ -901,6 +1013,16 @@ class TradingEngine:
                 "expiration_date": order.primary_expiration,
                 "display": order.to_display_string(),
             }
+        # Determine VIX macro regime label for UI
+        if self._current_vix >= 35:
+            vix_regime = "EXTREME_FEAR"
+        elif self._current_vix >= 25:
+            vix_regime = "STRESSED"
+        elif self._current_vix >= 18:
+            vix_regime = "ELEVATED"
+        else:
+            vix_regime = "CALM"
+
         return {
             "running": self.running,
             "mode": self.mode,
@@ -918,6 +1040,10 @@ class TradingEngine:
             "peak_equity": round(self.paper_engine.peak_equity, 2),
             "drawdown_pct": round(self.paper_engine.drawdown_pct * 100, 2),
             "total_pnl": round(self.paper_engine.capital - self.paper_engine.initial_capital, 2),
+            # VIX macro regime (hedge fund gate)
+            "vix": round(self._current_vix, 1),
+            "vix_term_ratio": round(self._vix_term_ratio, 3),
+            "vix_regime": vix_regime,
         }
 
 

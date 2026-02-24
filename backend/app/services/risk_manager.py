@@ -36,35 +36,56 @@ class RiskManager:
         self._kelly_window = 50
         self._kelly_fraction = 0.25  # Use quarter-Kelly for safety
 
+        # VIX-adjusted sizing (updated from trading engine on each data fetch)
+        self._current_vix: float = 20.0
+        self._vix_term_ratio: float = 0.90   # VIX / VIX3M; < 1.0 = contango (normal)
+
+    def set_vix(self, vix: float, vix3m: float = 0.0):
+        """Update VIX level and term structure ratio for dynamic Kelly sizing."""
+        self._current_vix = max(5.0, vix)
+        if vix3m > 0:
+            self._vix_term_ratio = vix / vix3m
+        logger.debug(f"VIX updated: spot={vix:.1f}, ratio={self._vix_term_ratio:.3f}")
+
+    def _vix_size_scalar(self) -> float:
+        """Scale position size inversely with VIX — hedge fund dynamic Kelly.
+
+        Targets: VIX=15 → 1.33x, VIX=20 → 1.0x, VIX=25 → 0.80x, VIX=35 → 0.57x.
+        Clamped to [0.5, 1.3] to prevent extremes.
+        Institutional reference: DE Shaw, Two Sigma use VIX-normalised sizing.
+        """
+        return max(0.5, min(20.0 / self._current_vix, 1.3))
+
     def _kelly_risk_fraction(self) -> float:
         """Compute Kelly Criterion-based risk fraction from recent trade history.
 
         Full Kelly = W - (1-W)/R where W=win_rate, R=avg_win/avg_loss.
-        We use fractional Kelly (quarter-Kelly) for safety.
+        We use fractional Kelly (quarter-Kelly) further scaled by VIX level.
         Falls back to the configured max_risk_per_trade when insufficient data.
         """
         if len(self._trade_results) < 10:
-            return self.max_risk_per_trade
+            base = self.max_risk_per_trade
+        else:
+            wins = [r for r in self._trade_results if r > 0]
+            losses = [r for r in self._trade_results if r <= 0]
 
-        wins = [r for r in self._trade_results if r > 0]
-        losses = [r for r in self._trade_results if r <= 0]
+            if not wins or not losses:
+                base = self.max_risk_per_trade
+            else:
+                win_rate = len(wins) / len(self._trade_results)
+                avg_win = sum(wins) / len(wins)
+                avg_loss = abs(sum(losses) / len(losses))
 
-        if not wins or not losses:
-            return self.max_risk_per_trade
+                if avg_loss == 0:
+                    base = self.max_risk_per_trade
+                else:
+                    payoff_ratio = avg_win / avg_loss
+                    kelly = win_rate - (1 - win_rate) / payoff_ratio
+                    base = max(0.002, min(kelly * self._kelly_fraction, self.max_risk_per_trade))
 
-        win_rate = len(wins) / len(self._trade_results)
-        avg_win = sum(wins) / len(wins)
-        avg_loss = abs(sum(losses) / len(losses))
-
-        if avg_loss == 0:
-            return self.max_risk_per_trade
-
-        payoff_ratio = avg_win / avg_loss
-        kelly = win_rate - (1 - win_rate) / payoff_ratio
-
-        # Clamp: never risk more than configured max, never go negative
-        kelly_adjusted = max(0.002, min(kelly * self._kelly_fraction, self.max_risk_per_trade))
-        return kelly_adjusted
+        # Dynamic VIX adjustment: scale down in high-vol environments
+        kelly_adjusted = base * self._vix_size_scalar()
+        return max(0.002, min(kelly_adjusted, self.max_risk_per_trade))
 
     def _time_of_day_scalar(self) -> float:
         """Scale position size based on time of day."""
