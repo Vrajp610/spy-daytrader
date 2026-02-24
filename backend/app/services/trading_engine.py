@@ -872,6 +872,7 @@ class TradingEngine:
             "equity": round(self.paper_engine.total_equity(self._get_last_price()), 2),
             "peak_equity": round(self.paper_engine.peak_equity, 2),
             "drawdown_pct": round(self.paper_engine.drawdown_pct * 100, 2),
+            "total_pnl": round(self.paper_engine.capital - self.paper_engine.initial_capital, 2),
         }
 
 

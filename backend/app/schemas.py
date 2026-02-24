@@ -66,6 +66,7 @@ class BotStatus(BaseModel):
     equity: Optional[float] = None
     peak_equity: Optional[float] = None
     drawdown_pct: Optional[float] = None
+    total_pnl: float = 0.0
 
 
 class TradingModeUpdate(BaseModel):

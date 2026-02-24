@@ -46,6 +46,12 @@ export default function BotControls() {
   const running = status?.running ?? false;
   const mode = status?.mode ?? 'paper';
   const regime = status?.current_regime ?? '--';
+  const dailyPnl = status?.daily_pnl ?? 0;
+  const totalPnl = status?.total_pnl ?? 0;
+  const equity = status?.equity ?? 0;
+
+  const fmtPnl = (v: number) =>
+    `${v >= 0 ? '+' : ''}$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <div className={`card p-4 ${running ? 'accent-left-green' : 'accent-left-red'}`}>
@@ -92,6 +98,27 @@ export default function BotControls() {
           </button>
           <span className="badge badge-active text-xxs">OPTIONS</span>
         </div>
+      </div>
+
+      <div className="flex items-center justify-between grid-line py-2">
+        <span className="label">Equity</span>
+        <span className="font-mono text-xs text-terminal-100">
+          ${equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between grid-line py-2">
+        <span className="label">Daily P&L</span>
+        <span className={`font-mono text-xs font-semibold ${dailyPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+          {fmtPnl(dailyPnl)}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between grid-line py-2">
+        <span className="label">Overall P&L</span>
+        <span className={`font-mono text-xs font-semibold ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+          {fmtPnl(totalPnl)}
+        </span>
       </div>
 
       <div className="flex items-center justify-between py-2">

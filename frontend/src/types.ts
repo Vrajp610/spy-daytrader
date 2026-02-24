@@ -12,6 +12,7 @@ export interface BotStatus {
   equity: number;
   peak_equity: number;
   drawdown_pct: number;
+  total_pnl: number;
 }
 
 export interface Position {
