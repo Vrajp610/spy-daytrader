@@ -46,7 +46,8 @@ async def set_mode(update: TradingModeUpdate):
 
 
 @router.get("/trades")
-async def get_trades(limit: int = 50):
+async def get_trades(limit: int = 0):
+    """Return closed trades. limit=0 (default) means all trades."""
     from app.database import async_session
     from app.models import Trade as TradeModel
     from app.schemas import TradeOut
@@ -58,13 +59,14 @@ async def get_trades(limit: int = 50):
         total_result = await db.execute(count_stmt)
         total = total_result.scalar() or 0
 
-        # Fetch recent trades
+        # Fetch trades — no limit when limit=0
         stmt = (
             select(TradeModel)
             .where(TradeModel.status == "CLOSED")
             .order_by(TradeModel.exit_time.desc())
-            .limit(limit)
         )
+        if limit > 0:
+            stmt = stmt.limit(limit)
         result = await db.execute(stmt)
         trades = result.scalars().all()
 

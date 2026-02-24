@@ -156,12 +156,11 @@ class TradingEngine:
                 result = await db.execute(stmt)
                 total_pnl = result.scalar() or 0.0
 
-                # Load last 200 closed trades for daily P&L / daily trade count
+                # Load ALL closed trades for daily P&L / daily trade count
                 stmt2 = (
                     select(TradeModel)
                     .where(TradeModel.is_paper.is_(True), TradeModel.status == "CLOSED")
                     .order_by(TradeModel.exit_time.desc())
-                    .limit(200)
                 )
                 result2 = await db.execute(stmt2)
                 recent_rows = result2.scalars().all()

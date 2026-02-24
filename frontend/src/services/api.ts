@@ -14,7 +14,7 @@ export const startBot = () => api.post('/trading/start').then(r => r.data);
 export const stopBot = () => api.post('/trading/stop').then(r => r.data);
 export const setMode = (mode: string, confirmation?: string) =>
   api.post('/trading/mode', { mode, confirmation }).then(r => r.data);
-export const getTrades = (limit = 50) =>
+export const getTrades = (limit = 0) =>
   api.get<{ trades: Trade[]; total: number }>('/trading/trades', { params: { limit } }).then(r => r.data);
 export const getPosition = () => api.get('/trading/position').then(r => r.data);
 

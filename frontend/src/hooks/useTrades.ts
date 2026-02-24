@@ -9,7 +9,7 @@ export function useTrades() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await getTrades(100);
+      const data = await getTrades();
       setTrades(data.trades);
       setTotal(data.total);
       setError(null);
