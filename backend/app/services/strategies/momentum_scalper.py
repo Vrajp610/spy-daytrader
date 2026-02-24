@@ -58,7 +58,7 @@ class MomentumScalperStrategy(BaseStrategy):
         row = df.iloc[idx]
         t = current_time.time() if isinstance(current_time, datetime) else current_time
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
-        if t < time(9, 45) or t >= eod:
+        if t < time(10, 0) or t >= eod:
             return None
 
         close = row["close"]

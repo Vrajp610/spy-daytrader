@@ -15,14 +15,14 @@ class Settings(BaseSettings):
     # Trading
     trading_mode: str = Field(default="paper", pattern="^(paper|live)$")
     initial_capital: float = 25000.0
-    max_risk_per_trade: float = 0.015
+    max_risk_per_trade: float = 0.01
     daily_loss_limit: float = 0.02
     max_drawdown: float = 0.16
     max_position_pct: float = 0.30
     max_trades_per_day: int = 100
-    cooldown_after_consecutive_losses: int = 3
-    cooldown_minutes: int = 15
-    min_signal_confidence: float = 0.6
+    cooldown_after_consecutive_losses: int = 2
+    cooldown_minutes: int = 30
+    min_signal_confidence: float = 0.65
 
     # Options settings
     default_spread_width: float = 3.0
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     preferred_dte_max: int = 14
     target_delta_short: float = 0.20
     credit_profit_target_pct: float = 0.50
-    max_contracts_per_trade: int = 10
+    max_contracts_per_trade: int = 3
     options_commission_per_contract: float = 0.65
 
     # Database

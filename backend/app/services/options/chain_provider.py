@@ -327,14 +327,19 @@ class SyntheticChainProvider:
                     iv=round(iv, 4),
                 )
 
+        # Adaptive IV rank: compare current annualized IV to SPY historical range
+        # SPY historical IV: ~10% (calm) to ~40% (very stressed); typical 15-25%
+        iv_low, iv_high = 0.10, 0.40
+        iv_rank = round(max(0.0, min(100.0, (iv - iv_low) / (iv_high - iv_low) * 100)), 1)
+
         return OptionChainSnapshot(
             underlying_price=underlying_price,
             timestamp=now,
             expirations=expirations,
             calls=calls,
             puts=puts,
-            iv_rank=50.0,
-            iv_percentile=50.0,
+            iv_rank=iv_rank,
+            iv_percentile=iv_rank,  # use same approximation for percentile
         )
 
 

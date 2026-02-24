@@ -479,12 +479,13 @@ class TradingEngine:
         if contracts <= 0:
             return
 
-        # Update contract count on the order
+        # Update contract count on the order (scale max_loss/max_profit proportionally)
+        old_contracts = max(1, order.contracts)
         for leg in order.legs:
             leg.quantity = contracts
         order.contracts = contracts
-        order.max_loss = (order.max_loss / max(1, order.contracts)) * contracts
-        order.max_profit = (order.max_profit / max(1, order.contracts)) * contracts
+        order.max_loss = (order.max_loss / old_contracts) * contracts
+        order.max_profit = (order.max_profit / old_contracts) * contracts
         order.regime = self.current_regime.value
 
         # Reject trades where commission would exceed max profit
