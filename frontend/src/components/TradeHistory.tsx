@@ -62,7 +62,9 @@ export default function TradeHistory({ trades, total }: Props) {
       <div className="card-header">
         <div className="flex items-center gap-2">
           <h2 className="card-title">Trade History</h2>
-          <span className="badge badge-paper">{total}</span>
+          <span className="badge badge-paper" title={`${total} total trades`}>
+            {filtered.length}{total > filtered.length ? ` / ${total}` : ''}
+          </span>
         </div>
         <select
           value={filterStrategy}
@@ -290,6 +292,23 @@ export default function TradeHistory({ trades, total }: Props) {
               </>
             ))}
           </tbody>
+          {sorted.length > 0 && (() => {
+            const totalPnl = sorted.reduce((s, t) => s + t.pnl, 0);
+            const wins = sorted.filter(t => t.pnl > 0).length;
+            return (
+              <tfoot className="border-t border-terminal-600/40 bg-terminal-800/60">
+                <tr>
+                  <td colSpan={7} className="px-2.5 py-1.5 text-xxs text-muted">
+                    {sorted.length} trades · {wins}W / {sorted.length - wins}L · WR {sorted.length > 0 ? ((wins / sorted.length) * 100).toFixed(0) : 0}%
+                  </td>
+                  <td className={`px-2.5 py-1.5 font-mono font-semibold text-xs ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            );
+          })()}
         </table>
       </div>
     </div>

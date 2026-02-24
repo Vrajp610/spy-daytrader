@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     credit_profit_target_pct: float = 0.50
     max_contracts_per_trade: int = 3
     options_commission_per_contract: float = 0.65
+    # Trailing stop: activate after this fraction of premium gained, then trail by trail_pct
+    trailing_stop_trigger_pct: float = 0.25   # activate after 25% gain on debit / 25% premium decay on credit
+    trailing_stop_trail_pct: float = 0.20     # close if premium reverses 20% from best level
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"

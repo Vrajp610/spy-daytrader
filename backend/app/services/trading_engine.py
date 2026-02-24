@@ -706,7 +706,39 @@ class TradingEngine:
                     )
                     return
 
-        # 4. Straddle/strangle: check total position P&L
+        # 4. Trailing stop — protect profits once position gains enough
+        ts_trigger = settings.trailing_stop_trigger_pct   # e.g. 0.25
+        ts_trail   = settings.trailing_stop_trail_pct     # e.g. 0.20
+        entry_prem = pos.entry_net_premium
+
+        if pos.is_credit:
+            # Credit: best_premium = lowest cost-to-close seen (= most profit).
+            # Activate when we've gained > trigger_pct of the credit received.
+            profit_captured = (entry_prem - pos.best_premium) / entry_prem if entry_prem > 0 else 0
+            if profit_captured >= ts_trigger:
+                # Trail: stop if current cost-to-close rises > trail_pct above best
+                trail_level = pos.best_premium * (1.0 + ts_trail)
+                if pos.current_premium >= trail_level:
+                    await self._close_options_position(
+                        current_price,
+                        f"trailing_stop_{ts_trail:.0%}_from_best",
+                    )
+                    return
+        else:
+            # Debit: best_premium = highest value seen since entry.
+            # Activate when best has exceeded entry by > trigger_pct.
+            gain_from_best = (pos.best_premium - entry_prem) / entry_prem if entry_prem > 0 else 0
+            if gain_from_best >= ts_trigger:
+                # Trail: stop if current premium falls > trail_pct below the best
+                trail_level = pos.best_premium * (1.0 - ts_trail)
+                if pos.current_premium <= trail_level:
+                    await self._close_options_position(
+                        current_price,
+                        f"trailing_stop_{ts_trail:.0%}_from_best",
+                    )
+                    return
+
+        # 5. Straddle/strangle: check total position P&L
         if pos.strategy_type in (
             OptionsStrategyType.LONG_STRADDLE,
             OptionsStrategyType.LONG_STRANGLE,
