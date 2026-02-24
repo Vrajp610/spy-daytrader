@@ -101,22 +101,22 @@
     padding-right: 1.75rem;
   }
 
-  /* Buttons */
+  /* Buttons — min 44px touch target on mobile */
   .btn-primary {
-    @apply px-4 py-2 bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+    @apply px-4 py-2 sm:py-2 bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-md transition-all
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
   }
   .btn-danger {
-    @apply px-4 py-2 bg-loss-dim hover:bg-loss text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+    @apply px-4 py-2 sm:py-2 bg-loss-dim hover:bg-loss text-white text-sm font-medium rounded-md transition-all
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
   }
   .btn-success {
-    @apply px-4 py-2 bg-profit-dim hover:bg-profit text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+    @apply px-4 py-2 sm:py-2 bg-profit-dim hover:bg-profit text-white text-sm font-medium rounded-md transition-all
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
   }
   .btn-ghost {
-    @apply px-4 py-2 bg-terminal-700/50 hover:bg-terminal-600/50 text-terminal-200 text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+    @apply px-4 py-2 sm:py-2 bg-terminal-700/50 hover:bg-terminal-600/50 text-terminal-200 text-sm font-medium rounded-md transition-all
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
   }
 
   /* Data table */

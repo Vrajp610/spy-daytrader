@@ -170,7 +170,7 @@ export default function AlertsFeed({ lastMessage }: Props) {
                 </div>
 
                 {/* Line 2: Contract details */}
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xxs font-mono text-terminal-400 pl-[4.5rem]">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xxs font-mono text-terminal-400 pl-4 sm:pl-[4.5rem]">
                   {alert.action === 'OPEN' && (
                     <>
                       <span>{alert.contracts} ct @ ${Math.abs(alert.net_premium).toFixed(2)}</span>

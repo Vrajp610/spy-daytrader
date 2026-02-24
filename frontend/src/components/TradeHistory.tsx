@@ -81,19 +81,19 @@ export default function TradeHistory({ trades, total }: Props) {
           <thead className="sticky top-0 bg-terminal-800/95 backdrop-blur-sm">
             <tr>
               <SortHeader label="Time" field="entry_time" />
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Trade</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest hidden sm:table-cell">Trade</th>
               <SortHeader label="Strategy" field="strategy" />
               <SortHeader label="Dir" field="direction" />
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Premium</th>
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Cost</th>
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Ct</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest hidden md:table-cell">Premium</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest hidden md:table-cell">Cost</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest hidden sm:table-cell">Ct</th>
               <SortHeader label="P&L" field="pnl" />
-              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest">Reason</th>
+              <th className="px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest hidden lg:table-cell">Reason</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-muted">No trades yet</td></tr>
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-muted">No trades yet — tap a row to expand details</td></tr>
             ) : sorted.map((t, i) => (
               <>
                 <tr
@@ -104,7 +104,7 @@ export default function TradeHistory({ trades, total }: Props) {
                   <td className="font-mono text-xxs tabular-nums text-muted">
                     {new Date(t.entry_time).toLocaleString()}
                   </td>
-                  <td className="font-mono text-xxs">
+                  <td className="font-mono text-xxs hidden sm:table-cell">
                     {isOptions(t) ? (
                       <div>
                         <span className="badge badge-paper text-xxs px-1.5">
@@ -135,7 +135,7 @@ export default function TradeHistory({ trades, total }: Props) {
                   <td className={`font-medium ${t.direction === 'LONG' ? 'text-profit' : 'text-loss'}`}>
                     {t.direction}
                   </td>
-                  <td className="font-mono tabular-nums">
+                  <td className="font-mono tabular-nums hidden md:table-cell">
                     {isOptions(t) ? (
                       <>
                         <span>${Math.abs(t.net_premium ?? t.entry_price).toFixed(2)}</span>
@@ -147,18 +147,18 @@ export default function TradeHistory({ trades, total }: Props) {
                       <>${t.entry_price.toFixed(2)}</>
                     )}
                   </td>
-                  <td className="font-mono tabular-nums text-terminal-200">
+                  <td className="font-mono tabular-nums text-terminal-200 hidden md:table-cell">
                     {isOptions(t) ? (
                       `$${(Math.abs(t.net_premium ?? t.entry_price) * (t.contracts ?? t.quantity) * 100).toFixed(0)}`
                     ) : (
                       `$${(t.entry_price * t.quantity).toFixed(0)}`
                     )}
                   </td>
-                  <td className="tabular-nums">{t.contracts ?? t.quantity}</td>
+                  <td className="tabular-nums hidden sm:table-cell">{t.contracts ?? t.quantity}</td>
                   <td className={`font-mono tabular-nums font-medium ${t.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
                     ${t.pnl.toFixed(2)}
                   </td>
-                  <td className="text-xxs text-muted">
+                  <td className="text-xxs text-muted hidden lg:table-cell">
                     {t.exit_reason}
                     {t.is_partial && <span className="ml-1 text-caution">(partial)</span>}
                   </td>

@@ -293,7 +293,7 @@ function LongTermTab() {
           </div>
 
           {/* Secondary metrics row */}
-          <div className="grid grid-cols-4 gap-2 text-sm mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm mb-4">
             <Stat label="Profit Factor" value={result.profit_factor.toFixed(2)} />
             <Stat label="Avg Win" value={`$${result.avg_win.toFixed(2)}`} color="text-profit" />
             <Stat label="Avg Loss" value={`$${result.avg_loss.toFixed(2)}`} color="text-loss" />

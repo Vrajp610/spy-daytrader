@@ -206,34 +206,34 @@ export default function StrategyLeaderboard() {
 
       {/* Rankings table */}
       {rankings.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="data-table text-xs">
+        <div className="overflow-x-auto -mx-1 px-1">
+          <table className="data-table text-xs min-w-[320px]">
             <thead>
               <tr>
-                <th>#</th>
+                <th className="w-6">#</th>
                 <th>Strategy</th>
                 <th className="text-right">Score</th>
-                {/* Short-term columns */}
-                <th className="text-right">ST Sharpe</th>
-                <th className="text-right">ST PF</th>
-                <th className="text-right">ST Win%</th>
-                <th className="text-right">ST Ret%</th>
+                {/* Short-term columns — progressively shown */}
+                <th className="text-right hidden sm:table-cell">ST Win%</th>
+                <th className="text-right hidden sm:table-cell">ST Ret%</th>
+                <th className="text-right hidden md:table-cell">ST Sharpe</th>
+                <th className="text-right hidden md:table-cell">ST PF</th>
                 {/* Long-term columns */}
                 {showLt && hasLtData && (
                   <>
-                    <th className="text-right border-l border-accent/20">LT CAGR</th>
-                    <th className="text-right">LT Sharpe</th>
-                    <th className="text-right">LT Sortino</th>
-                    <th className="text-right">LT WR%</th>
-                    <th className="text-right">LT MaxDD</th>
+                    <th className="text-right border-l border-accent/20 hidden lg:table-cell">LT CAGR</th>
+                    <th className="text-right hidden lg:table-cell">LT Sharpe</th>
+                    <th className="text-right hidden xl:table-cell">LT Sortino</th>
+                    <th className="text-right hidden lg:table-cell">LT WR%</th>
+                    <th className="text-right hidden xl:table-cell">LT MaxDD</th>
                   </>
                 )}
                 {/* Live columns */}
                 {showLive && hasAnyLive && (
                   <>
-                    <th className="text-right border-l border-profit/20">Live WR%</th>
-                    <th className="text-right">Live PF</th>
-                    <th className="text-right">Trades</th>
+                    <th className="text-right border-l border-profit/20 hidden md:table-cell">Live WR%</th>
+                    <th className="text-right hidden md:table-cell">Live PF</th>
+                    <th className="text-right hidden sm:table-cell">Trades</th>
                   </>
                 )}
                 <th className="text-right">Status</th>
@@ -263,41 +263,41 @@ export default function StrategyLeaderboard() {
                     </td>
 
                     {/* Short-term */}
-                    <td className={`text-right font-mono tabular-nums ${r.avg_sharpe_ratio >= 0 ? 'text-profit' : 'text-loss'}`}>
-                      {fmt2(r.avg_sharpe_ratio)}
-                    </td>
-                    <td className={`text-right font-mono tabular-nums ${r.avg_profit_factor >= 1 ? 'text-profit' : 'text-loss'}`}>
-                      {fmt2(r.avg_profit_factor)}
-                    </td>
-                    <td className={`text-right font-mono tabular-nums ${r.avg_win_rate >= 0.5 ? 'text-profit' : 'text-loss'}`}>
+                    <td className={`text-right font-mono tabular-nums hidden sm:table-cell ${r.avg_win_rate >= 0.5 ? 'text-profit' : 'text-loss'}`}>
                       {pct1(r.avg_win_rate)}
                     </td>
-                    <td className={`text-right font-mono tabular-nums ${r.avg_return_pct >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    <td className={`text-right font-mono tabular-nums hidden sm:table-cell ${r.avg_return_pct >= 0 ? 'text-profit' : 'text-loss'}`}>
                       {sign(r.avg_return_pct)}%
+                    </td>
+                    <td className={`text-right font-mono tabular-nums hidden md:table-cell ${r.avg_sharpe_ratio >= 0 ? 'text-profit' : 'text-loss'}`}>
+                      {fmt2(r.avg_sharpe_ratio)}
+                    </td>
+                    <td className={`text-right font-mono tabular-nums hidden md:table-cell ${r.avg_profit_factor >= 1 ? 'text-profit' : 'text-loss'}`}>
+                      {fmt2(r.avg_profit_factor)}
                     </td>
 
                     {/* Long-term columns */}
                     {showLt && hasLtData && (
                       hasThisLt ? (
                         <>
-                          <td className={`text-right font-mono tabular-nums border-l border-accent/10 ${r.lt_cagr_pct! >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums border-l border-accent/10 hidden lg:table-cell ${r.lt_cagr_pct! >= 0 ? 'text-profit' : 'text-loss'}`}>
                             {sign(r.lt_cagr_pct!)}%
                           </td>
-                          <td className={`text-right font-mono tabular-nums ${r.lt_sharpe! >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums hidden lg:table-cell ${r.lt_sharpe! >= 0 ? 'text-profit' : 'text-loss'}`}>
                             {fmt2(r.lt_sharpe!)}
                           </td>
-                          <td className={`text-right font-mono tabular-nums ${r.lt_sortino! >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums hidden xl:table-cell ${r.lt_sortino! >= 0 ? 'text-profit' : 'text-loss'}`}>
                             {fmt2(r.lt_sortino!)}
                           </td>
-                          <td className={`text-right font-mono tabular-nums ${r.lt_win_rate! >= 0.5 ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums hidden lg:table-cell ${r.lt_win_rate! >= 0.5 ? 'text-profit' : 'text-loss'}`}>
                             {pct1(r.lt_win_rate!)}
                           </td>
-                          <td className="text-right font-mono tabular-nums text-loss">
+                          <td className="text-right font-mono tabular-nums text-loss hidden xl:table-cell">
                             {fmt1(r.lt_max_drawdown_pct!)}%
                           </td>
                         </>
                       ) : (
-                        <td colSpan={5} className="text-center text-muted border-l border-accent/10">
+                        <td colSpan={5} className="text-center text-muted border-l border-accent/10 hidden lg:table-cell">
                           <span className="text-xxs">no LT data</span>
                         </td>
                       )
@@ -307,22 +307,22 @@ export default function StrategyLeaderboard() {
                     {showLive && hasAnyLive && (
                       hasLiveTrades ? (
                         <>
-                          <td className={`text-right font-mono tabular-nums border-l border-profit/10 ${live!.live_win_rate >= r.avg_win_rate ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums border-l border-profit/10 hidden md:table-cell ${live!.live_win_rate >= r.avg_win_rate ? 'text-profit' : 'text-loss'}`}>
                             {pct1(live!.live_win_rate)}
-                            <span className="ml-1 text-xxs opacity-50">
+                            <span className="ml-1 text-xxs opacity-50 hidden lg:inline">
                               ({live!.live_win_rate >= r.avg_win_rate ? '+' : ''}
                               {((live!.live_win_rate - r.avg_win_rate) * 100).toFixed(1)}pp)
                             </span>
                           </td>
-                          <td className={`text-right font-mono tabular-nums ${live!.live_profit_factor >= 1 ? 'text-profit' : 'text-loss'}`}>
+                          <td className={`text-right font-mono tabular-nums hidden md:table-cell ${live!.live_profit_factor >= 1 ? 'text-profit' : 'text-loss'}`}>
                             {fmt2(live!.live_profit_factor)}
                           </td>
-                          <td className="text-right font-mono tabular-nums text-muted">
+                          <td className="text-right font-mono tabular-nums text-muted hidden sm:table-cell">
                             {live!.live_trades}
                           </td>
                         </>
                       ) : (
-                        <td colSpan={3} className="text-center text-muted border-l border-profit/10">
+                        <td colSpan={3} className="text-center text-muted border-l border-profit/10 hidden md:table-cell">
                           <span className="text-xxs">—</span>
                         </td>
                       )
