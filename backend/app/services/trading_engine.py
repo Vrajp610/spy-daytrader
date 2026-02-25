@@ -43,7 +43,12 @@ from app.services.strategies.stoch_rsi import StochRSIStrategy
 from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
 from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
 from app.services.strategies.smart_rsi import SmartRSIStrategy
+from app.services.strategies.theta_decay import ThetaDecayStrategy
 from app.services.strategy_monitor import strategy_monitor
+from app.services.event_calendar import macro_calendar
+from app.services.news_scanner import news_scanner
+from app.services.trade_memory import query_similar_trades
+from app.services.trade_advisor import assess_trade as advisor_assess
 from app.websocket import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -54,20 +59,23 @@ REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+        "theta_decay",
     ],
     MarketRegime.TRENDING_DOWN: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+        "theta_decay",
     ],
     MarketRegime.RANGE_BOUND: [
         "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
         "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
-        "smc_supply_demand",
+        "smc_supply_demand", "theta_decay",
     ],
     MarketRegime.VOLATILE: [
         "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
         "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
         "stoch_rsi",
+        # theta_decay intentionally excluded: gamma blowup risk at short DTE
     ],
 }
 
@@ -115,6 +123,8 @@ class TradingEngine:
             "smc_supply_demand":   SMCSupplyDemandStrategy(),
             "mtf_ma_sr":           MtfMaSRStrategy(),
             "smart_rsi":           SmartRSIStrategy(),
+            # Theta decay: regime-aware premium selling (no backtest score needed)
+            "theta_decay":         ThetaDecayStrategy(),
         }
         self.enabled_strategies: set[str] = set(self.strategies.keys())
 
@@ -139,6 +149,7 @@ class TradingEngine:
         self._current_vix3m: float = 22.0        # 3-month VIX (^VIX3M)
         self._vix_term_ratio: float = 0.91       # VIX/VIX3M; <1=contango, >1=backwardation
         self._vix_last_fetch: Optional[datetime] = None
+        self._calendar_last_fetch: Optional[datetime] = None  # macro event calendar + news refresh
 
     async def _restore_paper_state(self):
         """Restore paper engine capital from persisted trade history.
@@ -286,6 +297,9 @@ class TradingEngine:
                 # Fetch VIX macro regime inputs (every 5 min, non-blocking)
                 await self._fetch_vix_data()
 
+                # Refresh macro event calendar + news scanner (every hour, non-blocking)
+                await self._fetch_calendar_news()
+
                 # Refresh strategy leaderboard scores
                 await self._refresh_strategy_scores()
 
@@ -416,6 +430,43 @@ class TradingEngine:
         except Exception as e:
             logger.debug(f"VIX fetch error (non-critical): {e}")
 
+    async def _fetch_calendar_news(self):
+        """Refresh macro event calendar and news scanner (throttled to once per hour).
+
+        The event calendar fetches ForexFactory this/next-week JSON (12h TTL).
+        The news scanner fetches yfinance SPY/VIX headlines (4h TTL).
+        Both singletons manage their own TTL internally; this method just
+        rate-limits the async wakeup to avoid hitting the executors every 5s.
+        """
+        now = datetime.now(ET)
+        if (self._calendar_last_fetch
+                and (now - self._calendar_last_fetch).total_seconds() < 3600):
+            return
+
+        try:
+            await macro_calendar.ensure_fresh()
+            await news_scanner.ensure_fresh()
+            self._calendar_last_fetch = now
+
+            # Log upcoming events once per refresh
+            upcoming = macro_calendar.upcoming_events(days_ahead=7)
+            if upcoming:
+                names = " | ".join(
+                    f"{e['date']} {e['title']}" for e in upcoming[:4]
+                )
+                logger.info(f"Upcoming macro events (7d): {names}")
+            else:
+                logger.debug("No high-impact macro events in the next 7 days")
+
+            risk = news_scanner.get_daily_risk()
+            if risk != "LOW":
+                reasons = news_scanner.get_risk_reasons()
+                logger.info(
+                    f"News risk={risk} | {'; '.join(r[:50] for r in reasons[:2])}"
+                )
+        except Exception as e:
+            logger.debug(f"Calendar/news refresh error (non-critical): {e}")
+
     async def _refresh_strategy_scores(self):
         """Load strategy composite scores from leaderboard for performance weighting.
         Also checks if any auto-disabled strategies are eligible for re-enable.
@@ -478,6 +529,29 @@ class TradingEngine:
             logger.debug("No option chain available, skipping entry check")
             return
 
+        now = datetime.now(ET)
+        today = now.date()
+
+        # ── Macro event calendar gate ─────────────────────────────────────────
+        # Block ALL entries on high-impact event days (FOMC, CPI, NFP, etc.).
+        # Volatility and direction are unpredictable in the hours around releases.
+        if macro_calendar.is_event_day(today):
+            events = macro_calendar.get_events_for_date(today)
+            names = ", ".join(e["title"] for e in events)
+            logger.info(f"EVENT DAY ({names}) — all new entries blocked")
+            return
+
+        # ── News risk gate ────────────────────────────────────────────────────
+        # Block all entries when news scanner detects HIGH macro shock language.
+        news_risk = news_scanner.get_daily_risk()
+        if news_risk == "HIGH":
+            reasons = news_scanner.get_risk_reasons()
+            logger.info(
+                f"News risk=HIGH — all entries blocked | "
+                f"{'; '.join(r[:60] for r in reasons[:2])}"
+            )
+            return
+
         # When VIX is elevated (25-35), restrict to mean-reversion strategies only.
         # High VIX → negative GEX environment → dealers amplify moves → momentum fails.
         vix_stressed = self._current_vix >= 25.0
@@ -503,6 +577,12 @@ class TradingEngine:
             and not strategy_monitor.is_auto_disabled(s)
         ]
 
+        # theta_decay holds spreads for 3 days — block it when any high-impact
+        # event falls inside that hold window (event would spike IV and direction).
+        if "theta_decay" in allowed and macro_calendar.is_blackout_window(today, window_days=3):
+            allowed = [s for s in allowed if s != "theta_decay"]
+            logger.debug("theta_decay blocked: macro event within 3-day hold window")
+
         # Build MarketContext for confluence scoring
         ctx = MarketContext(
             df_1min=self._df_1min if self._df_1min is not None else pd.DataFrame(),
@@ -516,7 +596,6 @@ class TradingEngine:
 
         # Collect all signals from eligible strategies
         candidates = []
-        now = datetime.now(ET)
         for strat_name in allowed:
             strategy = self.strategies.get(strat_name)
             if not strategy:
@@ -562,6 +641,12 @@ class TradingEngine:
             if len(candidates) < pre:
                 logger.debug(f"Regime filter: dropped {pre - len(candidates)} LONG signal(s) in TRENDING_DOWN")
 
+        # News MEDIUM risk: apply 8% confidence penalty to all candidates.
+        # Does not block outright but raises the effective bar for entry.
+        if news_risk == "MEDIUM" and candidates:
+            candidates = [(s, sig, sc * 0.92) for s, sig, sc in candidates]
+            logger.debug("News risk=MEDIUM — applied 8% confidence penalty to all candidates")
+
         # Execute best-scored signal (filtered by minimum confidence)
         if candidates:
             min_conf = settings.min_signal_confidence
@@ -573,7 +658,16 @@ class TradingEngine:
         if self._strategy_scores:
             weighted = []
             for strat_name, signal, score in candidates:
-                backtest_score = self._strategy_scores.get(strat_name, 0.0)
+                backtest_score = self._strategy_scores.get(strat_name)  # None if no backtest data
+                if backtest_score is None:
+                    # No backtest data yet — use a modest default performance weight so
+                    # backtest-validated technical strategies naturally outcompete this
+                    # strategy when their specific conditions fire.
+                    # perf_weight=0.25 ≈ composite score of 10 (just above the gate)
+                    default_perf_weight = 0.25
+                    blended = score * 0.6 + default_perf_weight * 0.4
+                    weighted.append((strat_name, signal, blended))
+                    continue
                 # Hard gate: skip strategies with clearly negative expected value
                 blended_perf = strategy_monitor.get_blended_score(strat_name, backtest_score)
                 if blended_perf < MIN_COMPOSITE_SCORE_TO_TRADE:
@@ -614,16 +708,85 @@ class TradingEngine:
         candidates.sort(key=lambda x: x[2], reverse=True)
         strat_name, signal, score = candidates[0]
 
+        regime_str = self.current_regime.value
+
+        # ── Trade memory: compare to similar historical setups ────────────────
+        # Build a lightweight context dict from what we know pre-order-selection.
+        # entry_iv: normalize IV rank (0-100) to 0-1; entry_theta is approximate.
+        iv_approx = (self._current_chain.iv_rank / 100.0) if self._current_chain else 0.20
+        memory_context = {
+            "entry_time": now.isoformat(),
+            "confidence": signal.confidence,
+            "entry_delta": signal.metadata.get("target_delta", 0.20),
+            "entry_iv": iv_approx,
+            "entry_theta": 0.01,   # estimated; precise value comes after selector
+            "max_loss": 300.0,     # conservative placeholder
+            "option_strategy_type": (
+                "PUT_CREDIT_SPREAD" if signal.direction.value == "LONG"
+                else "CALL_CREDIT_SPREAD"
+            ),
+            "regime": regime_str,
+        }
+        memory_result = query_similar_trades(
+            closed_trades=self.paper_engine.closed_trades,
+            context=memory_context,
+        )
+        if memory_result["verdict"] == "BLOCK":
+            logger.info(
+                f"TradeMemory: blocking {strat_name} — "
+                f"similar setups WR={memory_result.get('win_rate', '?'):.0%} "
+                f"(n={memory_result['similar_count']})"
+            )
+            return
+
         # Map signal to options order via selector
         risk_fraction = self.risk_manager._kelly_risk_fraction()   # already VIX-adjusted
         risk_fraction *= max(0.3, min(signal.confidence, 1.0))
         risk_fraction *= self.risk_manager._time_of_day_scalar()
+
+        # Trade memory penalty: reduce size when similar past setups underperformed
+        if memory_result["verdict"] == "PENALISE":
+            risk_fraction *= memory_result["confidence_multiplier"]
+            logger.info(
+                f"TradeMemory: {strat_name} size ×{memory_result['confidence_multiplier']:.0%} "
+                f"— similar WR={memory_result.get('win_rate', '?'):.0%}"
+            )
 
         # Additional VIX stress penalty: further reduce size in backwardation (near-term fear)
         if vix_backwardation:
             risk_fraction *= 0.6
             logger.debug(
                 f"VIX backwardation ({self._vix_term_ratio:.2f}) — applying 0.6x size penalty"
+            )
+
+        # ── Adversarial consultant: pressure-test before execution ────────────
+        upcoming_events = macro_calendar.upcoming_events(days_ahead=7)
+        portfolio_delta = self.paper_engine.portfolio_net_delta
+        if portfolio_delta != 0.0:
+            logger.debug(f"Portfolio net delta: {portfolio_delta:+.3f}")
+
+        advisor_result = await advisor_assess(
+            signal=signal,
+            regime_str=regime_str,
+            vix=self._current_vix,
+            news_risk=news_risk,
+            upcoming_events=upcoming_events,
+            daily_pnl=self.paper_engine.daily_pnl,
+            portfolio_delta=portfolio_delta,
+            memory_result=memory_result,
+        )
+        advisor_verdict = advisor_result.get("verdict", "PROCEED")
+        if advisor_verdict == "BLOCK":
+            logger.info(
+                f"TradeAdvisor: BLOCKED {strat_name} | "
+                f"{'; '.join(advisor_result.get('risk_factors', [])[:2])}"
+            )
+            return
+        elif advisor_verdict == "REDUCE":
+            risk_fraction *= 0.5
+            logger.info(
+                f"TradeAdvisor: REDUCE {strat_name} — halving size | "
+                f"{'; '.join(advisor_result.get('risk_factors', [])[:2])}"
             )
 
         order = self.options_selector.select(

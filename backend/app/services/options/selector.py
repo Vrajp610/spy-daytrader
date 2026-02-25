@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+from math import ceil
 from typing import Optional
 
 from app.config import settings
@@ -33,6 +34,12 @@ class OptionsSelector:
         confidence = signal.confidence
         options_pref = signal.metadata.get("options_preference")
 
+        # Extract per-signal overrides (theta_decay and similar strategies set these)
+        target_delta = signal.metadata.get("target_delta", settings.target_delta_short)
+        fallback_delta = signal.metadata.get("fallback_delta", target_delta)
+        preferred_dte = signal.metadata.get("preferred_dte")   # None = use defaults
+        min_dte = signal.metadata.get("min_dte")               # None = use settings default
+
         # Determine strategy type based on confidence + regime + preference + IV
         iv_rank = chain.iv_rank if chain.iv_rank is not None else 50.0
         strategy_type = self._select_strategy_type(
@@ -42,7 +49,11 @@ class OptionsSelector:
             return None
 
         # Pick expiration
-        expiration = self._select_expiration(chain, strategy_type)
+        expiration = self._select_expiration(
+            chain, strategy_type,
+            ideal_dte_override=preferred_dte,
+            min_dte_override=min_dte,
+        )
         if not expiration:
             logger.warning("No suitable expiration found")
             return None
@@ -50,6 +61,7 @@ class OptionsSelector:
         # Build the order
         order = self._build_order(
             strategy_type, signal, chain, expiration, capital, risk_fraction,
+            target_delta=target_delta, fallback_delta=fallback_delta,
         )
         return order
 
@@ -65,6 +77,12 @@ class OptionsSelector:
 
         if confidence < 0.55:
             return None
+
+        # force_credit_spread: always credit regardless of IV rank — check first
+        if preference == "force_credit_spread":
+            if direction == Direction.LONG:
+                return OptionsStrategyType.PUT_CREDIT_SPREAD
+            return OptionsStrategyType.CALL_CREDIT_SPREAD
 
         # Map preference string to strategy type
         pref_map = {
@@ -134,13 +152,22 @@ class OptionsSelector:
         return OptionsStrategyType.CALL_CREDIT_SPREAD
 
     def _select_expiration(
-        self, chain: OptionChainSnapshot, strategy_type: OptionsStrategyType,
+        self,
+        chain: OptionChainSnapshot,
+        strategy_type: OptionsStrategyType,
+        ideal_dte_override: Optional[int] = None,
+        min_dte_override: Optional[int] = None,
     ) -> Optional[str]:
-        """Choose the best expiration date based on strategy type."""
+        """Choose the best expiration date based on strategy type.
+
+        Args:
+            ideal_dte_override: If set, target this DTE instead of the default.
+            min_dte_override: If set, use as the minimum DTE floor instead of settings.preferred_dte_min.
+        """
         if not chain.expirations:
             return None
 
-        from datetime import datetime, date, timedelta
+        from datetime import datetime
         from zoneinfo import ZoneInfo
         today = datetime.now(ZoneInfo("America/New_York")).date()
 
@@ -151,7 +178,8 @@ class OptionsSelector:
             OptionsStrategyType.IRON_CONDOR,
         )
 
-        ideal_dte = 10 if is_credit else 7
+        min_dte_floor = min_dte_override if min_dte_override is not None else max(1, settings.preferred_dte_min)
+        ideal_dte = ideal_dte_override if ideal_dte_override is not None else (10 if is_credit else 7)
 
         best_exp = None
         best_diff = float("inf")
@@ -160,7 +188,7 @@ class OptionsSelector:
             try:
                 exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
                 dte = (exp_date - today).days
-                if dte < max(1, settings.preferred_dte_min):
+                if dte < min_dte_floor:
                     continue
                 diff = abs(dte - ideal_dte)
                 if diff < best_diff:
@@ -179,20 +207,25 @@ class OptionsSelector:
         expiration: str,
         capital: float,
         risk_fraction: float,
+        target_delta: Optional[float] = None,
+        fallback_delta: Optional[float] = None,
     ) -> Optional[OptionsOrder]:
         """Build the complete OptionsOrder with legs."""
         price = chain.underlying_price
         spread_width = settings.default_spread_width
-        target_delta = settings.target_delta_short
+        if target_delta is None:
+            target_delta = settings.target_delta_short
+        if fallback_delta is None:
+            fallback_delta = target_delta
 
         if strategy_type == OptionsStrategyType.PUT_CREDIT_SPREAD:
             return self._build_put_credit_spread(
-                chain, expiration, price, spread_width, target_delta,
+                chain, expiration, price, spread_width, target_delta, fallback_delta,
                 signal, capital, risk_fraction,
             )
         elif strategy_type == OptionsStrategyType.CALL_CREDIT_SPREAD:
             return self._build_call_credit_spread(
-                chain, expiration, price, spread_width, target_delta,
+                chain, expiration, price, spread_width, target_delta, fallback_delta,
                 signal, capital, risk_fraction,
             )
         elif strategy_type == OptionsStrategyType.CALL_DEBIT_SPREAD:
@@ -272,11 +305,14 @@ class OptionsSelector:
         return max(1, min(contracts, settings.max_contracts_per_trade))
 
     def _build_put_credit_spread(
-        self, chain, expiration, price, spread_width, target_delta,
+        self, chain, expiration, price, spread_width, target_delta, fallback_delta,
         signal, capital, risk_fraction,
     ) -> Optional[OptionsOrder]:
         """Sell higher put, buy lower put."""
         short_strike = self._find_strike_by_delta(chain, expiration, OptionType.PUT, target_delta)
+        if short_strike is None and fallback_delta != target_delta:
+            short_strike = self._find_strike_by_delta(chain, expiration, OptionType.PUT, fallback_delta)
+            logger.debug(f"put_credit_spread: fell back to delta {fallback_delta} for short strike")
         if short_strike is None:
             return None
 
@@ -301,7 +337,13 @@ class OptionsSelector:
             )
             return None
 
-        contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
+        # Theta-decay sizing: target weekly credit, capped at 40% of capital
+        if signal.metadata.get("options_preference") == "force_credit_spread":
+            target_contracts = ceil(settings.weekly_credit_target / (credit * 100))
+            capital_cap = int(capital * 0.40 / max_loss_per) if max_loss_per > 0 else 1
+            contracts = max(1, min(target_contracts, capital_cap, settings.max_contracts_per_trade_theta))
+        else:
+            contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         short_leg = OptionLeg(
             contract_symbol=short_leg_data.contract_symbol,
@@ -351,11 +393,14 @@ class OptionsSelector:
         )
 
     def _build_call_credit_spread(
-        self, chain, expiration, price, spread_width, target_delta,
+        self, chain, expiration, price, spread_width, target_delta, fallback_delta,
         signal, capital, risk_fraction,
     ) -> Optional[OptionsOrder]:
         """Sell lower call, buy higher call."""
         short_strike = self._find_strike_by_delta(chain, expiration, OptionType.CALL, target_delta)
+        if short_strike is None and fallback_delta != target_delta:
+            short_strike = self._find_strike_by_delta(chain, expiration, OptionType.CALL, fallback_delta)
+            logger.debug(f"call_credit_spread: fell back to delta {fallback_delta} for short strike")
         if short_strike is None:
             return None
 
@@ -380,7 +425,13 @@ class OptionsSelector:
             )
             return None
 
-        contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
+        # Theta-decay sizing: target weekly credit, capped at 40% of capital
+        if signal.metadata.get("options_preference") == "force_credit_spread":
+            target_contracts = ceil(settings.weekly_credit_target / (credit * 100))
+            capital_cap = int(capital * 0.40 / max_loss_per) if max_loss_per > 0 else 1
+            contracts = max(1, min(target_contracts, capital_cap, settings.max_contracts_per_trade_theta))
+        else:
+            contracts = self._size_contracts(max_loss_per, capital, risk_fraction)
 
         short_leg = OptionLeg(
             contract_symbol=short_leg_data.contract_symbol,

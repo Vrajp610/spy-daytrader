@@ -23,7 +23,13 @@ ALL_STRATEGIES = [
     "adx_trend", "golden_cross", "keltner_breakout", "williams_r",
     # From user's TradingView screenshots
     "rsi2_mean_reversion", "stoch_rsi", "smc_supply_demand", "mtf_ma_sr", "smart_rsi",
+    # Credit-spread / LT-only strategies (no 1-min intraday model)
+    "theta_decay",
 ]
+
+# Strategies that exist only in the LT daily backtester.
+# composite_score = lt_composite directly (no 55/45 ST/LT blend since there is no ST model).
+LT_ONLY_STRATEGIES: frozenset = frozenset({"theta_decay"})
 
 # Slippage / commission constants
 SLIPPAGE_BPS = 1          # 1 basis point per side
@@ -367,6 +373,57 @@ def _sig_smart_rsi(row: pd.Series, prev: pd.Series) -> Optional[str]:
     return None
 
 
+def _sig_theta_decay(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """
+    Theta decay credit-spread entry signal.
+
+    Fires when the environment is favourable for premium selling:
+      - Moderate volatility (ATR/price 0.4%–1.5%): enough premium to collect,
+        not so much that gamma risk overwhelms (proxy for VIX 8–24).
+      - RSI14 in the neutral zone 35–65: no runaway momentum in either direction.
+      - Today's bar range < 1.5 × ATR14: no outsized momentum candle.
+      - Clear EMA trend for direction:
+          LONG  (sell put spread) : close > ema50 AND close > ema200
+          SHORT (sell call spread): close < ema50 AND close < ema200
+
+    Returns "LONG", "SHORT", or None.
+    """
+    for col in ("atr14", "rsi14", "ema50", "ema200"):
+        if pd.isna(row.get(col)):
+            return None
+
+    atr   = float(row.atr14)
+    close = float(row.close)
+    if close <= 0 or atr <= 0:
+        return None
+
+    atr_pct = atr / close * 100          # expressed as a percentage, e.g. 0.8
+
+    # Moderate volatility gate: skip both too-quiet and too-wild days
+    if not (0.4 <= atr_pct <= 1.5):
+        return None
+
+    # RSI neutral zone: avoid entering near momentum extremes
+    if not (35 <= float(row.rsi14) <= 65):
+        return None
+
+    # No large-range candles (momentum continuation risk)
+    day_range = float(row.high) - float(row.low)
+    if day_range >= 1.5 * atr:
+        return None
+
+    ema50  = float(row.ema50)
+    ema200 = float(row.ema200)
+
+    # Sell put credit spread in clear uptrend
+    if close > ema50 and close > ema200:
+        return "LONG"
+    # Sell call credit spread in clear downtrend
+    if close < ema50 and close < ema200:
+        return "SHORT"
+    return None
+
+
 _SIGNAL_FUNCS = {
     "vwap_reversion":    _sig_vwap_reversion,
     "orb":               _sig_orb,
@@ -391,6 +448,8 @@ _SIGNAL_FUNCS = {
     "smc_supply_demand":    _sig_smc_supply_demand,
     "mtf_ma_sr":            _sig_mtf_ma_sr,
     "smart_rsi":            _sig_smart_rsi,
+    # Credit-spread / LT-only (Feb 2026)
+    "theta_decay":          _sig_theta_decay,
 }
 
 
@@ -429,6 +488,66 @@ def simulate_day_trade(
         return stop, "stop"
     else:
         return close, "eod"
+
+
+def simulate_credit_spread(
+    direction: str,
+    entry: float,
+    expiry_close: float,
+    atr: float,
+    spread_width: float = 5.0,
+    credit_pct: float = 0.10,
+) -> tuple:
+    """
+    Compute the P&L for one credit spread held to expiry (3 daily bars).
+
+    direction : "LONG"  = put credit spread (profit when price stays HIGH)
+                "SHORT" = call credit spread (profit when price stays LOW)
+
+    Geometry
+    --------
+    short_dist  = 1.5 × ATR  (proxy for ~0.10–0.15 delta strike at 3 DTE on SPY)
+    credit      = spread_width × credit_pct       (e.g. $0.50 on a $5 spread)
+    max_profit  = credit × 100                    (per contract)
+    max_loss    = (spread_width - credit) × 100   (per contract)
+
+    Payoff (LONG / put spread)
+    --------------------------
+    expiry_close ≥ short_strike              → full max_profit
+    expiry_close ≤ short_strike - spread_width → full max_loss
+    in-between                               → linear interpolation
+
+    Returns (pnl_dollars_per_contract: float, outcome: str)
+    outcome: "full_profit" | "full_loss" | "partial"
+    """
+    credit     = spread_width * credit_pct
+    max_profit = credit * 100
+    max_loss   = (spread_width - credit) * 100
+    short_dist = 1.5 * atr
+
+    if direction == "LONG":
+        short_strike = entry - short_dist
+        long_strike  = short_strike - spread_width   # lower protective put
+        if expiry_close >= short_strike:
+            return max_profit, "full_profit"
+        elif expiry_close <= long_strike:
+            return -max_loss, "full_loss"
+        else:
+            # 0 at long_strike → max_profit at short_strike (linear)
+            frac = (expiry_close - long_strike) / spread_width
+            pnl  = -max_loss + frac * (max_profit + max_loss)
+            return round(pnl, 2), "partial"
+    else:  # SHORT / call credit spread
+        short_strike = entry + short_dist
+        long_strike  = short_strike + spread_width   # higher protective call
+        if expiry_close <= short_strike:
+            return max_profit, "full_profit"
+        elif expiry_close >= long_strike:
+            return -max_loss, "full_loss"
+        else:
+            frac = (long_strike - expiry_close) / spread_width
+            pnl  = -max_loss + frac * (max_profit + max_loss)
+            return round(pnl, 2), "partial"
 
 
 # ── Position sizing ───────────────────────────────────────────────────────────
@@ -635,6 +754,10 @@ class LongTermBacktester:
         t_cap_before  = 0.0
         t_entry_date  = ""
         t_days_held   = 0
+        # Credit-spread trade state
+        t_is_credit_spread = False
+        t_atr_at_entry     = 0.0
+        t_credit_pct       = 0.0
 
         for i in range(1, len(rows)):
             today   = rows.iloc[i]
@@ -648,6 +771,45 @@ class LongTermBacktester:
             if in_trade:
                 t_days_held += 1
 
+                # ── Credit-spread: hold 3 days then settle at expiry close ─────
+                if t_is_credit_spread:
+                    if t_days_held >= 3:
+                        ep = today["close"]
+                        pnl_per_contract, er = simulate_credit_spread(
+                            t_direction,
+                            t_entry,
+                            ep,
+                            t_atr_at_entry,
+                            spread_width=5.0,
+                            credit_pct=t_credit_pct,
+                        )
+                        # t_shares holds contract count; pnl is already in dollars
+                        pnl     = pnl_per_contract * t_shares
+                        pnl_pct = pnl / capital * 100 if capital else 0.0
+
+                        capital_after = capital + pnl
+                        if capital_after <= 0:
+                            capital = 0.0
+                            break
+                        capital = capital_after
+
+                        all_trades.append(DailyTrade(
+                            date=date_str,
+                            strategy=t_strategy,
+                            direction=t_direction,
+                            entry=round(t_entry, 4),
+                            exit=round(ep, 4),
+                            shares=t_shares,
+                            pnl=round(pnl, 2),
+                            pnl_pct=round(pnl_pct, 4),
+                            exit_reason=er,
+                            capital_before=round(t_cap_before, 2),
+                            capital_after=round(capital, 2),
+                        ))
+                        in_trade = False
+                    continue  # still holding days 1–2, or just closed on day 3
+
+                # ── Standard swing-trade: stop/target vs H/L ─────────────────
                 # Check stop/target against today's H/L
                 ep, er = simulate_day_trade(
                     t_direction, t_entry,
@@ -741,24 +903,40 @@ class LongTermBacktester:
                 atr = entry * 0.01
             stop, target = self._stop_target(direction, entry, atr)
 
-            shares = _size_position(
-                capital, entry, stop,
-                self.max_risk_per_trade, self.max_position_pct,
-            )
+            # ── Position sizing ───────────────────────────────────────────────
+            is_credit = chosen_strategy in LT_ONLY_STRATEGIES
+            if is_credit:
+                # Size by max-loss per contract (not underlying shares)
+                atr_pct_dec  = atr / entry                          # decimal, e.g. 0.008
+                credit_pct   = max(0.06, min(0.12, atr_pct_dec * 8))
+                max_loss_per = (5.0 - 5.0 * credit_pct) * 100      # dollars per contract
+                risk_amt     = capital * self.max_risk_per_trade
+                shares       = max(1, int(risk_amt / max_loss_per))  # contracts
+                entry_credit_pct = credit_pct
+            else:
+                shares = _size_position(
+                    capital, entry, stop,
+                    self.max_risk_per_trade, self.max_position_pct,
+                )
+                entry_credit_pct = 0.0
+
             if shares <= 0:
                 continue
 
             # Open the trade (first check happens on day i+1 in next iteration)
-            in_trade     = True
-            t_direction  = direction
-            t_strategy   = chosen_strategy
-            t_entry      = entry
-            t_stop       = stop
-            t_target     = target
-            t_shares     = shares
-            t_cap_before = capital
-            t_entry_date = date_str
-            t_days_held  = 0
+            in_trade           = True
+            t_direction        = direction
+            t_strategy         = chosen_strategy
+            t_entry            = entry
+            t_stop             = stop
+            t_target           = target
+            t_shares           = shares
+            t_cap_before       = capital
+            t_entry_date       = date_str
+            t_days_held        = 0
+            t_is_credit_spread = is_credit
+            t_atr_at_entry     = atr
+            t_credit_pct       = entry_credit_pct
 
         # Final equity point
         last_date = str(rows["date"].iloc[-1])[:10]

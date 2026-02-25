@@ -31,10 +31,18 @@ class Settings(BaseSettings):
     target_delta_short: float = 0.20
     credit_profit_target_pct: float = 0.50
     max_contracts_per_trade: int = 3
+    max_contracts_per_trade_theta: int = 50    # higher ceiling for theta-decay sizing
+    weekly_credit_target: float = 2000.0       # target weekly credit collection ($)
     options_commission_per_contract: float = 0.65
     # Trailing stop: activate after this fraction of premium gained, then trail by trail_pct
     trailing_stop_trigger_pct: float = 0.25   # activate after 25% gain on debit / 25% premium decay on credit
     trailing_stop_trail_pct: float = 0.20     # close if premium reverses 20% from best level
+
+    # AI intelligence layer (Claude Haiku for news + adversarial trade advisor)
+    # Set via ANTHROPIC_API_KEY environment variable or .env file.
+    # If not set, news scanner falls back to keyword scoring and trade advisor
+    # always returns PROCEED (both are non-blocking fallbacks).
+    anthropic_api_key: str = ""
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"

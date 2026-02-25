@@ -242,6 +242,8 @@ class PaperOptionsEngine:
             "underlying_entry": round(pos.entry_underlying, 2),
             "underlying_exit": round(underlying_price, 2),
             "contracts": order.contracts,
+            # Market context at entry (populated by trading_engine before open_position)
+            "regime": order.regime if order.regime else "RANGE_BOUND",
         }
 
     @property
@@ -326,3 +328,19 @@ class PaperOptionsEngine:
         if self.position is None:
             return 0.0
         return self.position.order.max_loss
+
+    @property
+    def portfolio_net_delta(self) -> float:
+        """Net portfolio delta across all open legs (signed, per-share basis).
+
+        Positive = net long delta (profits when SPY rises).
+        Negative = net short delta (profits when SPY falls).
+        Zero means delta-neutral (e.g. a balanced credit spread at entry).
+        """
+        if self.position is None:
+            return 0.0
+        net = 0.0
+        for leg in self.position.order.legs:
+            sign = -1.0 if "SELL" in leg.action.value else 1.0
+            net += sign * leg.delta * leg.quantity
+        return round(net, 4)

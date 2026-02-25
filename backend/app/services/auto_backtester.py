@@ -22,7 +22,10 @@ from app.services.backtester import Backtester, STRATEGY_MAP
 
 logger = logging.getLogger(__name__)
 
-from app.services.long_term_backtester import ALL_STRATEGIES as LT_ALL_STRATEGIES
+from app.services.long_term_backtester import (
+    ALL_STRATEGIES as LT_ALL_STRATEGIES,
+    LT_ONLY_STRATEGIES,
+)
 
 ALL_STRATEGIES = list(STRATEGY_MAP.keys())
 
@@ -271,6 +274,8 @@ class AutoBacktester:
                 )
                 if latest is None:
                     return True
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=timezone.utc)
                 age_days = (datetime.now(timezone.utc) - latest).total_seconds() / 86400
                 return age_days > 8
         except Exception as e:
@@ -609,9 +614,13 @@ class AutoBacktester:
                     row.lt_composite_score  = lt_composite
                     row.lt_computed_at      = datetime.now(timezone.utc)
 
-                    # Re-blend: 55% ST + 45% LT
-                    st = row.st_composite_score if row.st_composite_score is not None else 0.0
-                    row.composite_score = _blend(st, lt_composite)
+                    # Re-blend: 55% ST + 45% LT.
+                    # LT-only strategies have no 1-min ST model — use lt_composite directly.
+                    if strat_name in LT_ONLY_STRATEGIES:
+                        row.composite_score = round(lt_composite, 2)
+                    else:
+                        st = row.st_composite_score if row.st_composite_score is not None else 0.0
+                        row.composite_score = _blend(st, lt_composite)
 
                 await db.commit()
                 logger.info(
