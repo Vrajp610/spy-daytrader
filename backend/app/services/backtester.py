@@ -32,6 +32,7 @@ from app.services.strategies.stoch_rsi import StochRSIStrategy
 from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
 from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
 from app.services.strategies.smart_rsi import SmartRSIStrategy
+from app.services.strategies.smc_ict import SMCICTStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ STRATEGY_MAP = {
     "smc_supply_demand":    SMCSupplyDemandStrategy,
     "mtf_ma_sr":            MtfMaSRStrategy,
     "smart_rsi":            SmartRSIStrategy,
+    # ICT Smart Money Concepts (A+/A/B confluence rating)
+    "smc_ict":              SMCICTStrategy,
 }
 
 # Regime -> preferred strategies
@@ -66,20 +69,23 @@ REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+        "smc_ict",
     ],
     MarketRegime.TRENDING_DOWN: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
+        "smc_ict",
     ],
     MarketRegime.RANGE_BOUND: [
         "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
         "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
-        "smc_supply_demand",
+        "smc_supply_demand", "smc_ict",
     ],
     MarketRegime.VOLATILE: [
         "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
         "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
         "stoch_rsi",
+        # smc_ict intentionally excluded: VOLATILE skipped inside strategy
     ],
 }
 

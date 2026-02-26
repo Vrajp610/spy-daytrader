@@ -44,6 +44,7 @@ from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
 from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
 from app.services.strategies.smart_rsi import SmartRSIStrategy
 from app.services.strategies.theta_decay import ThetaDecayStrategy
+from app.services.strategies.smc_ict import SMCICTStrategy
 from app.services.strategy_monitor import strategy_monitor
 from app.services.event_calendar import macro_calendar
 from app.services.news_scanner import news_scanner
@@ -59,23 +60,23 @@ REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "theta_decay",
+        "smc_ict", "theta_decay",
     ],
     MarketRegime.TRENDING_DOWN: [
         "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
         "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "theta_decay",
+        "smc_ict", "theta_decay",
     ],
     MarketRegime.RANGE_BOUND: [
         "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
         "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
-        "smc_supply_demand", "theta_decay",
+        "smc_supply_demand", "smc_ict", "theta_decay",
     ],
     MarketRegime.VOLATILE: [
         "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
         "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
         "stoch_rsi",
-        # theta_decay intentionally excluded: gamma blowup risk at short DTE
+        # smc_ict + theta_decay excluded: VOLATILE skipped inside each strategy
     ],
 }
 
@@ -125,6 +126,8 @@ class TradingEngine:
             "smart_rsi":           SmartRSIStrategy(),
             # Theta decay: regime-aware premium selling (no backtest score needed)
             "theta_decay":         ThetaDecayStrategy(),
+            # ICT Smart Money Concepts: A+/A/B confluence-rated order-flow strategy
+            "smc_ict":             SMCICTStrategy(),
         }
         self.enabled_strategies: set[str] = set(self.strategies.keys())
 
@@ -150,6 +153,10 @@ class TradingEngine:
         self._vix_term_ratio: float = 0.91       # VIX/VIX3M; <1=contango, >1=backwardation
         self._vix_last_fetch: Optional[datetime] = None
         self._calendar_last_fetch: Optional[datetime] = None  # macro event calendar + news refresh
+
+        # QQQ correlated data for SMT divergence checks in smc_ict
+        self._df_qqq_5min:  Optional[pd.DataFrame] = None
+        self._df_qqq_15min: Optional[pd.DataFrame] = None
 
     async def _restore_paper_state(self):
         """Restore paper engine capital from persisted trade history.
@@ -353,6 +360,19 @@ class TradingEngine:
                     self._df_1hr = ext.get("df_1hr")
                     self._df_4hr = ext.get("df_4hr")
                     self._last_extended_fetch = now
+
+                # Fetch QQQ for SMT divergence alongside SPY (same 15-min window)
+                try:
+                    qqq_1min = await loop.run_in_executor(
+                        None,
+                        lambda: self.data_manager.fetch_intraday("QQQ", period="2d", interval="1m"),
+                    )
+                    if qqq_1min is not None and not qqq_1min.empty:
+                        qqq_1min = self.data_manager.add_indicators(qqq_1min)
+                        self._df_qqq_5min  = self.data_manager.resample_to_5min(qqq_1min)
+                        self._df_qqq_15min = self.data_manager.resample_to_interval(qqq_1min, "15min")
+                except Exception as qqq_err:
+                    logger.debug(f"QQQ fetch error (non-critical): {qqq_err}")
         except Exception as e:
             logger.error(f"Data fetch error: {e}")
 
@@ -615,15 +635,24 @@ class TradingEngine:
                         df_5min=self._df_5min, df_15min=self._df_15min,
                         market_context=ctx,
                     )
+            elif strat_name == "smc_ict" and self._df_1min is not None and len(self._df_1min) > 60:
+                idx = len(self._df_1min) - 1
+                signal = strategy.generate_signal(
+                    self._df_1min, idx, now,
+                    market_context=ctx,
+                    df_qqq_5min=self._df_qqq_5min,
+                    df_qqq_15min=self._df_qqq_15min,
+                )
             elif self._df_1min is not None and len(self._df_1min) > 30:
                 idx = len(self._df_1min) - 1
                 signal = strategy.generate_signal(self._df_1min, idx, now, market_context=ctx)
 
             if signal:
-                # Apply multi-timeframe confluence scoring
-                confluence = BaseStrategy.compute_confluence_score(ctx, signal.direction)
-                confluence_weight = confluence / 100.0
-                signal.confidence = signal.confidence * 0.6 + confluence_weight * 0.4
+                # smc_ict has its own A+/A/B confluence rating — don't overwrite it
+                if strat_name != "smc_ict":
+                    confluence = BaseStrategy.compute_confluence_score(ctx, signal.direction)
+                    confluence_weight = confluence / 100.0
+                    signal.confidence = signal.confidence * 0.6 + confluence_weight * 0.4
 
                 score = signal.confidence
                 candidates.append((strat_name, signal, score))

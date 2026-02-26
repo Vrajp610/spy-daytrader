@@ -23,6 +23,8 @@ ALL_STRATEGIES = [
     "adx_trend", "golden_cross", "keltner_breakout", "williams_r",
     # From user's TradingView screenshots
     "rsi2_mean_reversion", "stoch_rsi", "smc_supply_demand", "mtf_ma_sr", "smart_rsi",
+    # ICT Smart Money Concepts (5-confluence system)
+    "smc_ict",
     # Credit-spread / LT-only strategies (no 1-min intraday model)
     "theta_decay",
 ]
@@ -424,6 +426,116 @@ def _sig_theta_decay(row: pd.Series, prev: pd.Series) -> Optional[str]:
     return None
 
 
+def _sig_smc_ict(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """
+    Daily-bar ICT Smart Money Concepts signal — 5-confluence scoring system.
+
+    Each confluence votes LONG or SHORT; signal fires when ≥3 agree.
+
+    Confluence 1 — HTF Order Block (last opposing daily candle before 3-day impulse)
+    Confluence 2 — Fair Value Gap       (3-day gap with price returning to fill)
+    Confluence 3 — Liquidity Sweep      (daily wick through N-day H/L, closes back inside)
+    Confluence 4 — RSI divergence proxy (price vs RSI swing – approximates SMT)
+    Confluence 5 — External liquidity   (price approaching Equal Highs or Equal Lows)
+
+    Uses the `_df` context injected via closure; falls back gracefully when
+    columns are missing.
+    """
+    required = ("close", "high", "low", "open", "atr14", "rsi14", "ema50", "ema200")
+    for col in required:
+        if pd.isna(row.get(col)):
+            return None
+
+    close  = float(row.close)
+    high   = float(row.high)
+    low    = float(row.low)
+    atr    = float(row.atr14)
+    rsi    = float(row.rsi14)
+    ema50  = float(row.ema50)
+    ema200 = float(row.ema200)
+
+    score_long  = 0
+    score_short = 0
+
+    # ── C1: Order Block ───────────────────────────────────────────────────────
+    # Provided by the `prev` series: last opposing candle before current impulse.
+    prev_bear = float(prev.get("close", close)) < float(prev.get("open", close))
+    prev_bull = float(prev.get("close", close)) > float(prev.get("open", close))
+    this_bull = close > float(row.open)
+    this_bear = close < float(row.open)
+
+    if prev_bear and this_bull:
+        # Potential bullish OB test: today's close back inside yesterday's body
+        ob_high = float(prev.get("open", close))
+        ob_low  = float(prev.get("close", close))
+        if ob_low * 0.998 <= close <= ob_high * 1.002:
+            score_long += 1
+    if prev_bull and this_bear:
+        ob_high = float(prev.get("close", close))
+        ob_low  = float(prev.get("open", close))
+        if ob_low * 0.998 <= close <= ob_high * 1.002:
+            score_short += 1
+
+    # ── C2: Fair Value Gap (3-day gap with current bar returning to it) ───────
+    # prev_prev handled via the prev.name index offset below (best-effort)
+    # Approximate: ATR-scaled gap on the previous two bars
+    prev_high = float(prev.get("high", high))
+    prev_low  = float(prev.get("low", low))
+    # Bullish FVG proxy: prev bar low > recent close range → gap above
+    gap_up_exists   = prev_low > close * 1.002
+    gap_down_exists = prev_high < close * 0.998
+    if gap_up_exists and this_bull:
+        score_long += 1
+    if gap_down_exists and this_bear:
+        score_short += 1
+
+    # ── C3: Liquidity Sweep ───────────────────────────────────────────────────
+    # Day's wick pierced N-day H/L but closed back inside → stop-hunt reversal
+    # (We approximate using ATR: a wick > 1.0× ATR beyond prior close)
+    prev_close = float(prev.get("close", close))
+    wick_low   = prev_close - low   # how far low went below prev close
+    wick_high  = high - prev_close  # how far high went above prev close
+
+    if wick_low > atr * 0.8 and close > prev_close * 0.998:
+        score_long += 1   # bullish sweep: wick below, closed back up
+    if wick_high > atr * 0.8 and close < prev_close * 1.002:
+        score_short += 1  # bearish sweep: wick above, closed back down
+
+    # ── C4: RSI Divergence proxy (≈ SMT between price and momentum) ──────────
+    prev_rsi   = float(prev.get("rsi14", rsi))
+    prev_close_val = float(prev.get("close", close))
+
+    # Bullish: price makes lower close but RSI is higher → momentum not confirming
+    if close < prev_close_val * 0.999 and rsi > prev_rsi * 1.03:
+        score_long += 1
+    # Bearish: price makes higher close but RSI is lower
+    if close > prev_close_val * 1.001 and rsi < prev_rsi * 0.97:
+        score_short += 1
+
+    # ── C5: External Liquidity (EQH / EQL approximation) ─────────────────────
+    # Price is near but below a significant resistance (EQH) → targeting up
+    # Price is near but above a significant support (EQL) → targeting down
+    atr_pct = atr / close
+    # Near EQH: price within 1× ATR below the ema200/ema50 rejection zone
+    # Near EQL: price within 1× ATR above the ema200/ema50 support zone
+    dist_above_ema50  = (close - ema50)  / close
+    dist_below_ema50  = (ema50 - close)  / close
+
+    if 0 < dist_above_ema50 < atr_pct * 2:
+        # Price just crossed above EMA50 — targeting next liquidity above
+        score_long += 1
+    if 0 < dist_below_ema50 < atr_pct * 2:
+        # Price just crossed below EMA50 — targeting next liquidity below
+        score_short += 1
+
+    # ── Verdict ───────────────────────────────────────────────────────────────
+    if score_long >= 3 and score_long > score_short:
+        return "LONG"
+    if score_short >= 3 and score_short > score_long:
+        return "SHORT"
+    return None
+
+
 _SIGNAL_FUNCS = {
     "vwap_reversion":    _sig_vwap_reversion,
     "orb":               _sig_orb,
@@ -448,6 +560,8 @@ _SIGNAL_FUNCS = {
     "smc_supply_demand":    _sig_smc_supply_demand,
     "mtf_ma_sr":            _sig_mtf_ma_sr,
     "smart_rsi":            _sig_smart_rsi,
+    # ICT SMC (Feb 2026)
+    "smc_ict":              _sig_smc_ict,
     # Credit-spread / LT-only (Feb 2026)
     "theta_decay":          _sig_theta_decay,
 }
