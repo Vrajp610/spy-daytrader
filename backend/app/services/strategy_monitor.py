@@ -159,6 +159,22 @@ class StrategyMonitor:
         st.disabled_at = datetime.now(timezone.utc)
         logger.warning(f"StrategyMonitor: auto-disabled [{strategy}] — {reason}")
 
+    async def auto_disable_strategy(self, strategy: str, reason: str, db) -> None:
+        """
+        Disable a strategy from the backtest retirement pipeline and persist to DB.
+        Idempotent — safe to call repeatedly with the same strategy.
+        """
+        st = self._get_or_create(strategy)
+        if st.auto_disabled:
+            return  # already disabled, no-op
+        st.auto_disabled = True
+        st.disabled_reason = reason
+        st.disabled_at = datetime.now(timezone.utc)
+        logger.warning(
+            f"StrategyMonitor: retirement auto-disable [{strategy}] — {reason}"
+        )
+        await self.save_to_db(strategy, db)
+
     def is_auto_disabled(self, strategy: str) -> bool:
         st = self._stats.get(strategy)
         return st.auto_disabled if st else False

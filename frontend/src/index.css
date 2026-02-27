@@ -5,30 +5,31 @@
 /* ── Base layer ── */
 @layer base {
   body {
-    @apply bg-terminal-950 text-terminal-100 font-sans antialiased;
+    @apply bg-terminal-950 text-terminal-100 font-mono antialiased;
     font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Custom scrollbar */
+  /* Thin scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
   ::-webkit-scrollbar-track {
     @apply bg-terminal-900;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-terminal-600 rounded-full;
+    @apply bg-terminal-600;
+    border-radius: 0;
   }
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-terminal-500;
   }
 
-  /* Focus ring */
+  /* Focus ring — green for terminal */
   *:focus-visible {
-    @apply outline-none ring-2 ring-accent/50 ring-offset-1 ring-offset-terminal-950;
+    @apply outline-none ring-1 ring-profit/60 ring-offset-0;
   }
 
   /* Remove number input spinners */
@@ -41,17 +42,18 @@
     -moz-appearance: textfield;
   }
 
-  /* Date picker icon fix */
+  /* Date picker */
   input[type='date']::-webkit-calendar-picker-indicator {
-    filter: invert(0.5);
+    filter: invert(0.4);
   }
 }
 
 /* ── Component layer ── */
 @layer components {
+  /* Flat card — hairline border, zero radius */
   .card {
-    @apply bg-terminal-800/80 backdrop-blur-sm border border-terminal-600/30 rounded-card shadow-card;
-    background-image: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+    @apply bg-terminal-800 border border-terminal-600/60;
+    border-radius: 0;
   }
 
   .card-header {
@@ -59,7 +61,7 @@
   }
 
   .card-title {
-    @apply text-base font-semibold text-terminal-100;
+    @apply text-xs font-bold text-terminal-100 uppercase tracking-terminal;
   }
 
   .label {
@@ -72,68 +74,76 @@
 
   /* Badges */
   .badge {
-    @apply inline-flex items-center gap-1.5 text-xxs font-medium px-2 py-0.5 rounded-full border;
+    @apply inline-flex items-center gap-1.5 text-xxs font-bold px-2 py-0.5 uppercase tracking-terminal;
+    border-radius: 0;
+    border: 1px solid;
   }
   .badge-live {
-    @apply border-loss/40 bg-loss/10 text-loss;
+    @apply border-loss/50 bg-loss/10 text-loss;
   }
   .badge-paper {
-    @apply border-accent/40 bg-accent/10 text-accent;
+    @apply border-profit/50 bg-profit/10 text-profit;
   }
   .badge-active {
-    @apply border-profit/40 bg-profit/10 text-profit;
+    @apply border-profit/50 bg-profit/10 text-profit;
   }
 
   /* Inputs */
   .input {
-    @apply w-full bg-terminal-900/80 border border-terminal-600/40 rounded-md px-2.5 py-1.5 text-sm text-terminal-100 font-mono
+    @apply w-full bg-terminal-900 border border-terminal-600/60 px-2.5 py-1.5 text-xs text-terminal-100 font-mono
            placeholder:text-subtle transition-colors
-           focus:border-accent/60 focus:ring-1 focus:ring-accent/30 focus:outline-none;
+           focus:border-profit/60 focus:ring-1 focus:ring-profit/20 focus:outline-none;
+    border-radius: 0;
   }
 
   .select {
-    @apply w-full bg-terminal-900/80 border border-terminal-600/40 rounded-md px-2.5 py-1.5 text-sm text-terminal-100
+    @apply w-full bg-terminal-900 border border-terminal-600/60 px-2.5 py-1.5 text-xs text-terminal-100 font-mono
            appearance-none cursor-pointer transition-colors
-           focus:border-accent/60 focus:ring-1 focus:ring-accent/30 focus:outline-none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' fill='none' stroke='%236b7394' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+           focus:border-profit/60 focus:ring-1 focus:ring-profit/20 focus:outline-none;
+    border-radius: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' fill='none' stroke='%236a6a6a' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     padding-right: 1.75rem;
   }
 
-  /* Buttons — min 44px touch target on mobile */
+  /* Buttons — flat, zero-radius, uppercase */
   .btn-primary {
-    @apply px-4 py-2 sm:py-2 bg-accent hover:bg-accent-dim text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
+    @apply px-4 py-2 bg-profit hover:bg-profit-dim text-terminal-950 text-xs font-bold uppercase tracking-terminal transition-all
+           active:opacity-80 disabled:opacity-40 disabled:pointer-events-none min-h-[44px] sm:min-h-[36px];
+    border-radius: 0;
   }
   .btn-danger {
-    @apply px-4 py-2 sm:py-2 bg-loss-dim hover:bg-loss text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
+    @apply px-4 py-2 bg-transparent border border-loss/60 hover:bg-loss/10 text-loss text-xs font-bold uppercase tracking-terminal transition-all
+           active:opacity-80 disabled:opacity-40 disabled:pointer-events-none min-h-[44px] sm:min-h-[36px];
+    border-radius: 0;
   }
   .btn-success {
-    @apply px-4 py-2 sm:py-2 bg-profit-dim hover:bg-profit text-white text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
+    @apply px-4 py-2 bg-profit hover:bg-profit-dim text-terminal-950 text-xs font-bold uppercase tracking-terminal transition-all
+           active:opacity-80 disabled:opacity-40 disabled:pointer-events-none min-h-[44px] sm:min-h-[36px];
+    border-radius: 0;
   }
   .btn-ghost {
-    @apply px-4 py-2 sm:py-2 bg-terminal-700/50 hover:bg-terminal-600/50 text-terminal-200 text-sm font-medium rounded-md transition-all
-           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none min-h-[44px] sm:min-h-0;
+    @apply px-4 py-2 bg-transparent border border-terminal-600/60 hover:border-terminal-500 text-terminal-200 text-xs font-bold uppercase tracking-terminal transition-all
+           active:opacity-80 disabled:opacity-40 disabled:pointer-events-none min-h-[44px] sm:min-h-[36px];
+    border-radius: 0;
   }
 
   /* Data table */
   .data-table {
-    @apply w-full text-xs;
+    @apply w-full text-xs font-mono;
   }
   .data-table thead {
-    @apply text-muted border-b border-terminal-600/30;
+    @apply text-muted border-b border-terminal-600/40;
   }
   .data-table thead th {
-    @apply px-2.5 py-2 text-left text-xxs font-medium uppercase tracking-widest;
+    @apply px-2.5 py-2 text-left text-xxs font-bold uppercase tracking-widest;
   }
-  .data-table thead th[class*="text-right"] {
+  .data-table thead th[class*='text-right'] {
     text-align: right;
   }
   .data-table tbody tr {
-    @apply border-b border-terminal-700/30 hover:bg-terminal-700/20 transition-colors;
+    @apply border-b border-terminal-700/40 hover:bg-profit/5 transition-colors;
   }
   .data-table tbody td {
     @apply px-2.5 py-2;
@@ -141,30 +151,65 @@
 
   /* Progress bar */
   .progress-track {
-    @apply w-full bg-terminal-700/50 rounded-full h-2.5 overflow-hidden;
+    @apply w-full bg-terminal-700/50 h-1 overflow-hidden;
+    border-radius: 0;
   }
   .progress-fill {
-    @apply h-full rounded-full transition-all duration-500;
+    @apply h-full transition-all duration-500;
+    border-radius: 0;
   }
 
   /* Toggle switch */
   .toggle {
-    @apply w-8 h-4 rounded-full transition-colors relative cursor-pointer;
+    @apply w-8 h-4 transition-colors relative cursor-pointer;
+    border-radius: 0;
   }
   .toggle-knob {
-    @apply absolute w-3 h-3 bg-white rounded-full top-0.5 transition-all shadow-sm;
+    @apply absolute w-3 h-3 bg-white top-0.5 transition-all shadow-sm;
+    border-radius: 0;
   }
 
   /* Skeleton loader */
   .skeleton {
-    @apply bg-terminal-700/50 rounded-card animate-shimmer;
+    @apply bg-terminal-700/50 animate-shimmer;
+    border-radius: 0;
     background-image: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255,255,255,0.03) 50%,
+      rgba(0,255,136,0.03) 50%,
       transparent 100%
     );
     background-size: 200% 100%;
+  }
+
+  /* Nav tab — active state with green underline */
+  .nav-tab {
+    @apply px-4 py-3 text-xxs font-bold uppercase tracking-widest text-muted transition-colors hover:text-terminal-200 relative;
+  }
+  .nav-tab-active {
+    @apply text-profit;
+  }
+  .nav-tab-active::after {
+    content: '';
+    @apply absolute bottom-0 left-0 right-0 h-0.5 bg-profit;
+  }
+
+  /* Stat row inside cards */
+  .stat-row {
+    @apply flex items-center justify-between py-1.5 border-b border-terminal-600/20 last:border-0;
+  }
+
+  /* Terminal chip / strategy badge */
+  .chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xxs font-bold uppercase tracking-terminal border border-terminal-600/40 text-muted bg-transparent transition-colors cursor-pointer;
+    border-radius: 0;
+  }
+  .chip-active {
+    @apply border-profit/50 bg-profit/10 text-profit;
+  }
+  .chip-active::before {
+    content: '▸';
+    @apply text-profit;
   }
 }
 
@@ -175,10 +220,10 @@
   }
 
   .text-glow-green {
-    text-shadow: 0 0 20px rgba(34, 197, 94, 0.4), 0 0 40px rgba(34, 197, 94, 0.15);
+    text-shadow: 0 0 12px rgba(0, 255, 136, 0.5), 0 0 30px rgba(0, 255, 136, 0.2);
   }
   .text-glow-red {
-    text-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.15);
+    text-shadow: 0 0 12px rgba(255, 68, 68, 0.5), 0 0 30px rgba(255, 68, 68, 0.2);
   }
 
   .accent-left-green {
@@ -188,10 +233,29 @@
     @apply border-l-2 border-l-loss;
   }
   .accent-left-blue {
-    @apply border-l-2 border-l-accent;
+    @apply border-l-2 border-l-profit;
   }
 
   .grid-line {
-    @apply border-b border-terminal-700/20;
+    @apply border-b border-terminal-600/20;
+  }
+
+  /* Scanline overlay for that CRT feel */
+  .scanlines::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.08) 2px,
+      rgba(0, 0, 0, 0.08) 4px
+    );
+    pointer-events: none;
+  }
+
+  .tracking-terminal {
+    letter-spacing: 0.08em;
   }
 }

@@ -49,6 +49,9 @@ class MarketContext:
     df_1hr: pd.DataFrame
     df_4hr: pd.DataFrame
     regime: MarketRegime
+    # Macro/options context — populated by trading engine on each loop iteration
+    iv_rank: float = 50.0    # options chain IV rank (0-100 percentile)
+    vix: float = 20.0        # VIX spot level
 
 
 @dataclass

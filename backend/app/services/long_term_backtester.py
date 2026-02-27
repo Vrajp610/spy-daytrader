@@ -13,20 +13,16 @@ from app.services.historical_data import HistoricalDataManager
 
 logger = logging.getLogger(__name__)
 
-# All 21 strategy names — original 12 + 4 technical (Feb 2026) + 5 from screenshots
+# Core 12 strategies (pruned Feb 2026 — removed 16 redundant/underperforming strategies)
 ALL_STRATEGIES = [
-    # Original 12
-    "vwap_reversion", "orb", "ema_crossover", "volume_flow", "mtf_momentum",
-    "rsi_divergence", "bb_squeeze", "macd_reversal", "momentum_scalper",
-    "gap_fill", "micro_pullback", "double_bottom_top",
-    # Technical additions (Feb 2026)
-    "adx_trend", "golden_cross", "keltner_breakout", "williams_r",
-    # From user's TradingView screenshots
-    "rsi2_mean_reversion", "stoch_rsi", "smc_supply_demand", "mtf_ma_sr", "smart_rsi",
-    # ICT Smart Money Concepts (5-confluence system)
+    "vwap_reversion", "ema_crossover", "mtf_momentum",
+    "adx_trend", "keltner_breakout",
+    "rsi2_mean_reversion",
     "smc_ict",
     # Credit-spread / LT-only strategies (no 1-min intraday model)
     "theta_decay",
+    # Advanced strategies (Feb 2026 upgrade)
+    "orb_scalp", "trend_continuation", "zero_dte_bull_put", "vol_spike",
 ]
 
 # Strategies that exist only in the LT daily backtester.
@@ -536,34 +532,103 @@ def _sig_smc_ict(row: pd.Series, prev: pd.Series) -> Optional[str]:
     return None
 
 
+def _sig_orb_scalp(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """ORB Scalp: breakout above/below prev high/low with high volume (>150% avg)."""
+    if pd.isna(prev.high) or pd.isna(prev.low) or pd.isna(row.vol_ratio):
+        return None
+    if float(row.vol_ratio) < 1.5:
+        return None
+    if row.close > prev.high:
+        return "LONG"
+    if row.close < prev.low:
+        return "SHORT"
+    return None
+
+
+def _sig_trend_continuation(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """Trend continuation: price near SMA20 in EMA50 trend, RSI pullback zone."""
+    if any(pd.isna([row.sma20, row.ema50, row.rsi14])):
+        return None
+    sma20 = float(row.sma20)
+    ema50 = float(row.ema50)
+    close = float(row.close)
+    rsi = float(row.rsi14)
+    near_sma20 = abs(close - sma20) / sma20 < 0.005  # within 0.5%
+    # Uptrend: EMA50 rising (sma20 > ema50 proxy), price near sma20, RSI 35-48
+    if close > ema50 and sma20 > ema50 and near_sma20 and 35 <= rsi <= 48:
+        return "LONG"
+    # Downtrend: EMA50 declining, price near sma20, RSI 52-65
+    if close < ema50 and sma20 < ema50 and near_sma20 and 52 <= rsi <= 65:
+        return "SHORT"
+    return None
+
+
+def _sig_wtr_long_call(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """WTR Long Call: Monday positive bias — SPY above SMA20, RSI 35-65."""
+    if any(pd.isna([row.sma20, row.rsi14])):
+        return None
+    # Day-of-week check (index is date)
+    try:
+        dow = pd.Timestamp(row.name).dayofweek  # 0=Monday
+    except Exception:
+        dow = -1
+    if dow != 0:  # Monday only
+        return None
+    close = float(row.close)
+    sma20 = float(row.sma20)
+    rsi = float(row.rsi14)
+    # Bullish setup: above SMA20, RSI not overbought
+    if close > sma20 and 35 <= rsi <= 68:
+        return "LONG"
+    return None
+
+
+def _sig_zero_dte_bull_put(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """Zero-DTE Bull Put: neutral/bullish days with moderate RSI — sell put spread."""
+    if any(pd.isna([row.sma20, row.rsi14, row.atr14])):
+        return None
+    close = float(row.close)
+    sma20 = float(row.sma20)
+    rsi = float(row.rsi14)
+    atr = float(row.atr14)
+    atr_pct = atr / close * 100
+    # Moderate vol environment: not too calm, not too wild
+    if not (0.3 <= atr_pct <= 1.2):
+        return None
+    # Bullish / neutral RSI, above SMA20
+    if close > sma20 and 40 <= rsi <= 60:
+        return "LONG"
+    return None
+
+
+def _sig_vol_spike(row: pd.Series, prev: pd.Series) -> Optional[str]:
+    """Vol Spike: ATR expansion + large daily move — long straddle direction proxy."""
+    if any(pd.isna([row.atr14, prev.atr14, row.roc5])):
+        return None
+    atr_expanded = float(row.atr14) > float(prev.atr14) * 1.5
+    if not atr_expanded:
+        return None
+    roc5 = float(row.roc5)
+    if roc5 > 1.0:
+        return "LONG"
+    if roc5 < -1.0:
+        return "SHORT"
+    return None
+
+
 _SIGNAL_FUNCS = {
-    "vwap_reversion":    _sig_vwap_reversion,
-    "orb":               _sig_orb,
-    "ema_crossover":     _sig_ema_crossover,
-    "volume_flow":       _sig_volume_flow,
-    "mtf_momentum":      _sig_mtf_momentum,
-    "rsi_divergence":    _sig_rsi_divergence,
-    "bb_squeeze":        _sig_bb_squeeze,
-    "macd_reversal":     _sig_macd_reversal,
-    "momentum_scalper":  _sig_momentum_scalper,
-    "gap_fill":          _sig_gap_fill,
-    "micro_pullback":    _sig_micro_pullback,
-    "double_bottom_top": _sig_double_bottom_top,
-    # New (Feb 2026)
-    "adx_trend":         _sig_adx_trend,
-    "golden_cross":      _sig_golden_cross,
-    "keltner_breakout":  _sig_keltner_breakout,
-    "williams_r":        _sig_williams_r,
-    # From screenshots (Feb 2026)
+    "vwap_reversion":       _sig_vwap_reversion,
+    "ema_crossover":        _sig_ema_crossover,
+    "mtf_momentum":         _sig_mtf_momentum,
+    "adx_trend":            _sig_adx_trend,
+    "keltner_breakout":     _sig_keltner_breakout,
     "rsi2_mean_reversion":  _sig_rsi2,
-    "stoch_rsi":            _sig_stoch_rsi,
-    "smc_supply_demand":    _sig_smc_supply_demand,
-    "mtf_ma_sr":            _sig_mtf_ma_sr,
-    "smart_rsi":            _sig_smart_rsi,
-    # ICT SMC (Feb 2026)
     "smc_ict":              _sig_smc_ict,
-    # Credit-spread / LT-only (Feb 2026)
     "theta_decay":          _sig_theta_decay,
+    "orb_scalp":            _sig_orb_scalp,
+    "trend_continuation":   _sig_trend_continuation,
+    "zero_dte_bull_put":    _sig_zero_dte_bull_put,
+    "vol_spike":            _sig_vol_spike,
 }
 
 

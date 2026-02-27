@@ -13,6 +13,8 @@ from app.database import init_db
 from app.websocket import ws_manager
 from app.routes import trading, backtest, account, settings as settings_routes
 from app.routes import leaderboard
+from app.routes import analytics
+from app.routes import webhook
 
 
 class StructuredFormatter(logging.Formatter):
@@ -96,6 +98,8 @@ app.include_router(backtest.router)
 app.include_router(account.router)
 app.include_router(settings_routes.router)
 app.include_router(leaderboard.router)
+app.include_router(analytics.router)
+app.include_router(webhook.router)
 
 
 @app.websocket("/ws")

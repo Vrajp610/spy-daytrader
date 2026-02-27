@@ -29,18 +29,24 @@ from app.services.long_term_backtester import (
 
 ALL_STRATEGIES = list(STRATEGY_MAP.keys())
 
+# Retirement thresholds: strategies failing any of these 3-month rolling
+# metrics will be flagged for disabling by the strategy_monitor.
+RETIREMENT_SHARPE_MIN = 1.0      # Sharpe < 1 → flag for review
+RETIREMENT_WIN_RATE_MIN = 0.50   # WR < 50%  → flag for review
+RETIREMENT_MAX_DD_PCT = 8.0      # DD > 8%   → flag for review (per spec)
+
 # Long-term retraining interval (seconds) — default 7 days
 LT_RETRAIN_INTERVAL_HOURS = 7 * 24
 
-# Curated multi-strategy combinations
+# Curated multi-strategy combinations (updated Feb 2026 after strategy pruning)
 COMBO_CONFIGS = [
-    ["vwap_reversion", "orb", "ema_crossover"],
-    ["vwap_reversion", "volume_flow", "rsi_divergence"],
-    ["orb", "ema_crossover", "mtf_momentum", "micro_pullback"],
-    ["bb_squeeze", "rsi_divergence", "double_bottom_top"],
-    ["macd_reversal", "gap_fill", "vwap_reversion"],
-    ["momentum_scalper", "micro_pullback", "ema_crossover"],
-    ["vwap_reversion", "orb", "ema_crossover", "volume_flow", "mtf_momentum"],
+    ["vwap_reversion", "ema_crossover", "rsi2_mean_reversion"],
+    ["ema_crossover", "mtf_momentum", "adx_trend"],
+    ["orb_scalp", "trend_continuation", "ema_crossover"],
+    ["vwap_reversion", "rsi2_mean_reversion", "zero_dte_bull_put"],
+    ["keltner_breakout", "vol_spike", "vwap_reversion"],
+    ["smc_ict", "ema_crossover", "adx_trend"],
+    ["vwap_reversion", "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion"],
     ALL_STRATEGIES[:6],
     ALL_STRATEGIES,
 ]
@@ -498,8 +504,71 @@ class AutoBacktester:
                     f"AutoBacktester: rankings computed for {len(strategy_stats)} strategies "
                     f"({len(existing_lt)} with LT data)"
                 )
+
+            # Check retirement thresholds after writing rankings
+            await self._check_strategy_retirement(strategy_stats)
         except Exception as e:
             logger.error(f"AutoBacktester: failed to compute rankings: {e}")
+
+    async def _check_strategy_retirement(self, strategy_stats: dict[str, list[dict]]):
+        """Flag or disable strategies that breach 3-month rolling retirement thresholds.
+
+        Retirement criteria (any one triggers disable via strategy_monitor):
+          - Sharpe  < RETIREMENT_SHARPE_MIN (1.0) AND WR < RETIREMENT_WIN_RATE_MIN (50%)
+          - MaxDD   > RETIREMENT_MAX_DD_PCT (8%)
+          - Negative total return across all short-term runs
+
+        Disabled strategies can be re-enabled after 24h if backtest score recovers ≥ 10.
+        """
+        try:
+            from app.services.strategy_monitor import strategy_monitor
+            from app.database import async_session
+
+            for strat_name, runs in strategy_stats.items():
+                if not runs:
+                    continue
+
+                def _avg(key, rs=runs):
+                    vals = [r.get(key) for r in rs if r.get(key) is not None]
+                    return sum(vals) / len(vals) if vals else None
+
+                avg_sharpe = _avg("sharpe_ratio") or 0.0
+                avg_wr = _avg("win_rate") or 0.0
+                avg_dd = _avg("max_drawdown_pct") or 0.0
+                avg_ret = _avg("total_return_pct") or 0.0
+                total_trades = sum(r.get("total_trades", 0) for r in runs)
+
+                # Only evaluate strategies with enough recent trades
+                if total_trades < 5:
+                    continue
+
+                retire_reason: Optional[str] = None
+
+                if avg_dd > RETIREMENT_MAX_DD_PCT:
+                    retire_reason = (
+                        f"rolling max_dd={avg_dd:.1f}% > {RETIREMENT_MAX_DD_PCT}% threshold"
+                    )
+                elif (avg_sharpe < RETIREMENT_SHARPE_MIN
+                      and avg_wr < RETIREMENT_WIN_RATE_MIN
+                      and avg_ret < 0):
+                    retire_reason = (
+                        f"poor rolling metrics: Sharpe={avg_sharpe:.2f}, "
+                        f"WR={avg_wr:.0%}, return={avg_ret:.1f}%"
+                    )
+
+                if retire_reason:
+                    logger.warning(
+                        f"Retirement threshold breached: {strat_name} | {retire_reason}"
+                    )
+                    async with async_session() as db:
+                        await strategy_monitor.auto_disable_strategy(
+                            strat_name, retire_reason, db
+                        )
+        except AttributeError:
+            # auto_disable_strategy may not exist in older strategy_monitor versions
+            pass
+        except Exception as e:
+            logger.debug(f"Retirement check error (non-critical): {e}")
 
     # ── Long-term daily backtest ──────────────────────────────────────────────
 

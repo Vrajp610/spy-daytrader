@@ -4,6 +4,8 @@ import type {
   BacktestResult, StrategyConfig, Trade, TradingSettings,
   LeaderboardResponse, StrategyComparison, StrategyLiveStats,
   LongTermBacktestRequest, LongTermBacktestResult,
+  PortfolioAnalyticsData, MonteCarloResult, PortfolioGreeks,
+  RollingStrategyPerf,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -67,3 +69,19 @@ export const getLtProgress = () =>
   api.get('/leaderboard/lt-progress').then(r => r.data);
 export const getLivePerformance = () =>
   api.get<StrategyLiveStats[]>('/leaderboard/live-performance').then(r => r.data);
+
+// Portfolio Analytics
+export const getPortfolioAnalytics = () =>
+  api.get<PortfolioAnalyticsData>('/analytics/portfolio').then(r => r.data);
+export const getMonteCarlo = (nSimulations = 2000, nDays = 21) =>
+  api.get<MonteCarloResult>('/analytics/monte-carlo', {
+    params: { n_simulations: nSimulations, n_days: nDays },
+  }).then(r => r.data);
+export const getPortfolioGreeks = () =>
+  api.get<PortfolioGreeks & { open_position: boolean; portfolio_net_delta: number }>(
+    '/analytics/greeks'
+  ).then(r => r.data);
+export const getRollingPerformance = (lookbackDays = 90) =>
+  api.get<Record<string, RollingStrategyPerf>>('/analytics/rolling-performance', {
+    params: { lookback_days: lookbackDays },
+  }).then(r => r.data);

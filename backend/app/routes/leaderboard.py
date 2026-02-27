@@ -10,6 +10,12 @@ from app.models import StrategyRanking, BacktestRun
 from app.schemas import StrategyRankingOut, LeaderboardResponse, StrategyComparisonOut, StrategyLiveStats
 from app.services.auto_backtester import auto_backtester
 from app.services.strategy_monitor import strategy_monitor
+from app.services.auto_backtester import ALL_STRATEGIES as ST_STRATEGIES
+from app.services.long_term_backtester import LT_ONLY_STRATEGIES
+
+# Only return data for currently active strategies — pruned strategies are
+# filtered out here so stale DB rows never surface in the UI.
+ACTIVE_STRATEGIES: frozenset[str] = frozenset(ST_STRATEGIES) | LT_ONLY_STRATEGIES
 
 router = APIRouter(prefix="/api/leaderboard", tags=["leaderboard"])
 
@@ -18,7 +24,11 @@ router = APIRouter(prefix="/api/leaderboard", tags=["leaderboard"])
 async def get_rankings(db: AsyncSession = Depends(get_db)):
     stmt = select(StrategyRanking).order_by(StrategyRanking.composite_score.desc())
     result = await db.execute(stmt)
-    rankings = [StrategyRankingOut.model_validate(r) for r in result.scalars().all()]
+    rankings = [
+        StrategyRankingOut.model_validate(r)
+        for r in result.scalars().all()
+        if r.strategy_name in ACTIVE_STRATEGIES
+    ]
     return LeaderboardResponse(
         rankings=rankings,
         progress=auto_backtester.progress,
@@ -62,6 +72,9 @@ async def get_comparison(db: AsyncSession = Depends(get_db)):
                     label = "30d"
             except (ValueError, TypeError):
                 pass
+
+        if strats not in ACTIVE_STRATEGIES:
+            continue
 
         comparisons.append(StrategyComparisonOut(
             strategy=strats,
@@ -112,4 +125,8 @@ async def get_lt_progress():
 async def get_live_performance():
     """Per-strategy live/paper trade performance used for adaptive blending."""
     all_stats = strategy_monitor.all_stats()
-    return [StrategyLiveStats(**v) for v in all_stats.values()]
+    return [
+        StrategyLiveStats(**v)
+        for k, v in all_stats.items()
+        if k in ACTIVE_STRATEGIES
+    ]

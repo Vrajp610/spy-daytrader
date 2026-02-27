@@ -23,28 +23,17 @@ from app.services.risk_manager import RiskManager
 from app.services.strategies.base import BaseStrategy, Direction, TradeSignal, MarketContext
 from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
-from app.services.strategies.orb import ORBStrategy
 from app.services.strategies.ema_crossover import EMACrossoverStrategy
-from app.services.strategies.volume_flow import VolumeFlowStrategy
 from app.services.strategies.mtf_momentum import MTFMomentumStrategy
-from app.services.strategies.rsi_divergence import RSIDivergenceStrategy
-from app.services.strategies.bb_squeeze import BBSqueezeStrategy
-from app.services.strategies.macd_reversal import MACDReversalStrategy
-from app.services.strategies.momentum_scalper import MomentumScalperStrategy
-from app.services.strategies.gap_fill import GapFillStrategy
-from app.services.strategies.micro_pullback import MicroPullbackStrategy
-from app.services.strategies.double_bottom_top import DoubleBottomTopStrategy
 from app.services.strategies.adx_trend import ADXTrendStrategy
-from app.services.strategies.golden_cross import GoldenCrossStrategy
 from app.services.strategies.keltner_breakout import KeltnerBreakoutStrategy
-from app.services.strategies.williams_r import WilliamsRStrategy
 from app.services.strategies.rsi2_mean_reversion import RSI2MeanReversionStrategy
-from app.services.strategies.stoch_rsi import StochRSIStrategy
-from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
-from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
-from app.services.strategies.smart_rsi import SmartRSIStrategy
 from app.services.strategies.theta_decay import ThetaDecayStrategy
 from app.services.strategies.smc_ict import SMCICTStrategy
+from app.services.strategies.orb_scalp import ORBScalpStrategy
+from app.services.strategies.trend_continuation import TrendContinuationStrategy
+from app.services.strategies.zero_dte_bull_put import ZeroDTEBullPutStrategy
+from app.services.strategies.vol_spike import VolSpikeStrategy
 from app.services.strategy_monitor import strategy_monitor
 from app.services.event_calendar import macro_calendar
 from app.services.news_scanner import news_scanner
@@ -58,25 +47,22 @@ ET = ZoneInfo("America/New_York")
 
 REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
-        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
-        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "smc_ict", "theta_decay",
+        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
+        "smc_ict", "theta_decay", "orb_scalp", "trend_continuation",
     ],
     MarketRegime.TRENDING_DOWN: [
-        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
-        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "smc_ict", "theta_decay",
+        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
+        "smc_ict", "theta_decay", "orb_scalp", "trend_continuation",
     ],
     MarketRegime.RANGE_BOUND: [
-        "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
-        "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
-        "smc_supply_demand", "smc_ict", "theta_decay",
+        "vwap_reversion", "rsi2_mean_reversion", "smc_ict", "theta_decay",
+        "zero_dte_bull_put",
     ],
     MarketRegime.VOLATILE: [
-        "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
-        "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
-        "stoch_rsi",
+        "vwap_reversion", "keltner_breakout",
         # smc_ict + theta_decay excluded: VOLATILE skipped inside each strategy
+        # vol_spike buys straddles to profit from IV expansion
+        "vol_spike",
     ],
 }
 
@@ -100,34 +86,18 @@ class TradingEngine:
         self.current_regime = MarketRegime.RANGE_BOUND
 
         self.strategies: dict[str, BaseStrategy] = {
-            # Original 12
             "vwap_reversion":      VWAPReversionStrategy(),
-            "orb":                 ORBStrategy(),
             "ema_crossover":       EMACrossoverStrategy(),
-            "volume_flow":         VolumeFlowStrategy(),
             "mtf_momentum":        MTFMomentumStrategy(),
-            "rsi_divergence":      RSIDivergenceStrategy(),
-            "bb_squeeze":          BBSqueezeStrategy(),
-            "macd_reversal":       MACDReversalStrategy(),
-            "momentum_scalper":    MomentumScalperStrategy(),
-            "gap_fill":            GapFillStrategy(),
-            "micro_pullback":      MicroPullbackStrategy(),
-            "double_bottom_top":   DoubleBottomTopStrategy(),
-            # Technical additions
             "adx_trend":           ADXTrendStrategy(),
-            "golden_cross":        GoldenCrossStrategy(),
             "keltner_breakout":    KeltnerBreakoutStrategy(),
-            "williams_r":          WilliamsRStrategy(),
-            # TradingView screenshot strategies
             "rsi2_mean_reversion": RSI2MeanReversionStrategy(),
-            "stoch_rsi":           StochRSIStrategy(),
-            "smc_supply_demand":   SMCSupplyDemandStrategy(),
-            "mtf_ma_sr":           MtfMaSRStrategy(),
-            "smart_rsi":           SmartRSIStrategy(),
-            # Theta decay: regime-aware premium selling (no backtest score needed)
             "theta_decay":         ThetaDecayStrategy(),
-            # ICT Smart Money Concepts: A+/A/B confluence-rated order-flow strategy
             "smc_ict":             SMCICTStrategy(),
+            "orb_scalp":           ORBScalpStrategy(),
+            "trend_continuation":  TrendContinuationStrategy(),
+            "zero_dte_bull_put":   ZeroDTEBullPutStrategy(),
+            "vol_spike":           VolSpikeStrategy(),
         }
         self.enabled_strategies: set[str] = set(self.strategies.keys())
 
@@ -526,6 +496,127 @@ class TradingEngine:
         except Exception as e:
             logger.debug(f"Could not load strategy scores: {e}")
 
+    async def execute_webhook_signal(
+        self,
+        action: str,
+        strategy: str,
+        price: float,
+        stop_loss: float,
+        take_profit: float,
+        confidence: float = 0.70,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Execute a pre-formed signal arriving from a TradingView webhook.
+
+        Applies risk gates (daily loss, circuit breaker, existing position, no chain)
+        but skips strategy filtering, confluence scoring, and trade advisor.
+        """
+        metadata = metadata or {}
+
+        # CLOSE action — close any open position at the webhook price
+        if action == "CLOSE":
+            if self.paper_engine.position:
+                await self._close_options_position(price, reason="webhook_close")
+                return {"status": "closed", "reason": "position closed via webhook"}
+            return {"status": "rejected", "reason": "no open position to close"}
+
+        # Only BUY / SELL accepted beyond this point
+        if action not in ("BUY", "SELL"):
+            return {"status": "rejected", "reason": f"unknown action '{action}'"}
+
+        # Risk gate
+        equity = self.paper_engine.total_equity(price or self._get_last_price())
+        can_trade, gate_reason = self.risk_manager.can_trade(
+            equity,
+            self.paper_engine.peak_equity,
+            self.paper_engine.daily_pnl,
+            self.paper_engine.trades_today,
+        )
+        if not can_trade:
+            return {"status": "rejected", "reason": gate_reason}
+
+        # Must not already be in a trade
+        if self.paper_engine.position is not None:
+            return {"status": "rejected", "reason": "position already open"}
+
+        # Options chain must be loaded (market must be open)
+        if self._current_chain is None:
+            return {"status": "rejected", "reason": "no options chain available"}
+
+        direction = Direction.LONG if action == "BUY" else Direction.SHORT
+
+        # Build a synthetic TradeSignal from the webhook payload
+        signal = TradeSignal(
+            strategy=strategy,
+            direction=direction,
+            entry_price=price,
+            stop_loss=stop_loss if stop_loss else price * 0.995,
+            take_profit=take_profit if take_profit else price * 1.010,
+            confidence=min(1.0, max(0.0, confidence)),
+            metadata=metadata,
+        )
+
+        # Apply Kelly-adjusted risk fraction (VIX-adjusted, no confidence scaling)
+        risk_fraction = self.risk_manager._kelly_risk_fraction()
+
+        order = self.options_selector.select(
+            signal, self.current_regime, self._current_chain,
+            self.paper_engine.capital, risk_fraction,
+        )
+        if order is None:
+            return {"status": "rejected", "reason": "options selector returned no order"}
+
+        # Contract sizing
+        open_risk = self.paper_engine.open_risk
+        contracts = options_sizing.calculate_contracts(
+            order, self.paper_engine.capital, risk_fraction, open_risk,
+        )
+        if contracts <= 0:
+            return {"status": "rejected", "reason": "contract sizing returned 0"}
+
+        old_contracts = max(1, order.contracts)
+        for leg in order.legs:
+            leg.quantity = contracts
+        order.contracts = contracts
+        order.max_loss = (order.max_loss / old_contracts) * contracts
+        order.max_profit = (order.max_profit / old_contracts) * contracts
+        order.regime = self.current_regime.value
+
+        # Commission sanity check
+        total_legs = sum(leg.quantity for leg in order.legs)
+        estimated_commission = total_legs * settings.options_commission_per_contract * 2
+        total_premium = abs(order.net_premium) * contracts * 100
+        if estimated_commission >= total_premium * 0.5:
+            return {"status": "rejected", "reason": "commission exceeds 50% of premium"}
+
+        if order.is_credit and abs(order.net_premium) < 0.10:
+            return {"status": "rejected", "reason": "credit premium too low (<$0.10)"}
+
+        pos = self.paper_engine.open_position(order)
+        if not pos:
+            return {"status": "rejected", "reason": "paper engine rejected position"}
+
+        trade_summary = {
+            "strategy": strategy,
+            "direction": direction.value,
+            "option_strategy_type": order.strategy_type.value,
+            "contracts": contracts,
+            "net_premium": round(order.net_premium, 4),
+            "max_loss": round(order.max_loss, 2),
+            "max_profit": round(order.max_profit, 2),
+            "display": order.to_display_string(),
+        }
+        await ws_manager.broadcast("trade_update", {
+            "action": "OPEN",
+            "source": "webhook",
+            **trade_summary,
+        })
+        logger.info(
+            f"Webhook signal executed: {strategy} {action} "
+            f"{contracts}x {order.strategy_type.value} | {order.to_display_string()}"
+        )
+        return {"status": "executed", "order": trade_summary}
+
     async def _check_entries(self):
         """Check all enabled strategies for entry signals, then map to options."""
         last_price = self._get_last_price()
@@ -582,8 +673,7 @@ class TradingEngine:
 
         # In stressed VIX environments, only allow mean-reversion strategies
         MEAN_REVERSION_STRATEGIES = {
-            "vwap_reversion", "rsi_divergence", "bb_squeeze",
-            "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
+            "vwap_reversion", "rsi2_mean_reversion",
         }
         if vix_stressed:
             allowed_by_regime = [s for s in allowed_by_regime if s in MEAN_REVERSION_STRATEGIES]
@@ -603,7 +693,10 @@ class TradingEngine:
             allowed = [s for s in allowed if s != "theta_decay"]
             logger.debug("theta_decay blocked: macro event within 3-day hold window")
 
-        # Build MarketContext for confluence scoring
+        # Build MarketContext for confluence scoring (includes options chain context)
+        chain_iv_rank = (
+            self._current_chain.iv_rank if self._current_chain is not None else 50.0
+        )
         ctx = MarketContext(
             df_1min=self._df_1min if self._df_1min is not None else pd.DataFrame(),
             df_5min=self._df_5min if self._df_5min is not None else pd.DataFrame(),
@@ -612,6 +705,8 @@ class TradingEngine:
             df_1hr=self._df_1hr if self._df_1hr is not None else pd.DataFrame(),
             df_4hr=self._df_4hr if self._df_4hr is not None else pd.DataFrame(),
             regime=self.current_regime,
+            iv_rank=chain_iv_rank,
+            vix=self._current_vix,
         )
 
         # Collect all signals from eligible strategies
@@ -635,6 +730,12 @@ class TradingEngine:
                         df_5min=self._df_5min, df_15min=self._df_15min,
                         market_context=ctx,
                     )
+            elif strat_name == "trend_continuation":
+                # Needs 5-min bars (accessed via market_context.df_5min)
+                if (self._df_1min is not None and len(self._df_1min) > 30
+                        and self._df_5min is not None and len(self._df_5min) > 25):
+                    idx = len(self._df_1min) - 1
+                    signal = strategy.generate_signal(self._df_1min, idx, now, market_context=ctx)
             elif strat_name == "smc_ict" and self._df_1min is not None and len(self._df_1min) > 60:
                 idx = len(self._df_1min) - 1
                 signal = strategy.generate_signal(

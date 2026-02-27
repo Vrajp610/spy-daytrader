@@ -4,18 +4,18 @@ import { triggerBacktests, triggerLongTermBacktest, getLivePerformance } from '.
 import type { StrategyLiveStats } from '../types';
 
 const STRATEGY_LABELS: Record<string, string> = {
-  vwap_reversion:   'VWAP Reversion',
-  orb:              'ORB',
-  ema_crossover:    'EMA Crossover',
-  volume_flow:      'Volume Flow',
-  mtf_momentum:     'MTF Momentum',
-  rsi_divergence:   'RSI Divergence',
-  bb_squeeze:       'BB Squeeze',
-  macd_reversal:    'MACD Reversal',
-  momentum_scalper: 'Mom. Scalper',
-  gap_fill:         'Gap Fill',
-  micro_pullback:   'Micro Pullback',
-  double_bottom_top:'Dbl Bot/Top',
+  vwap_reversion:       'VWAP Reversion',
+  ema_crossover:        'EMA Crossover',
+  mtf_momentum:         'MTF Momentum',
+  adx_trend:            'ADX Trend',
+  keltner_breakout:     'Keltner Breakout',
+  rsi2_mean_reversion:  'RSI-2 Mean Rev.',
+  smc_ict:              'SMC / ICT',
+  orb_scalp:            'ORB Scalp',
+  trend_continuation:   'Trend Cont.',
+  zero_dte_bull_put:    '0-DTE Bull Put',
+  vol_spike:            'Vol Spike',
+  theta_decay:          'Theta Decay',
 };
 
 const RANK_COLORS = ['text-caution', 'text-terminal-300', 'text-orange-400'];

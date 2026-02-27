@@ -12,80 +12,51 @@ from app.services.exit_manager import ExitManager, PositionState
 from app.services.strategies.base import BaseStrategy, TradeSignal, Direction, ExitReason
 from app.services.strategies.regime_detector import RegimeDetector, MarketRegime
 from app.services.strategies.vwap_reversion import VWAPReversionStrategy
-from app.services.strategies.orb import ORBStrategy
 from app.services.strategies.ema_crossover import EMACrossoverStrategy
-from app.services.strategies.volume_flow import VolumeFlowStrategy
 from app.services.strategies.mtf_momentum import MTFMomentumStrategy
-from app.services.strategies.rsi_divergence import RSIDivergenceStrategy
-from app.services.strategies.bb_squeeze import BBSqueezeStrategy
-from app.services.strategies.macd_reversal import MACDReversalStrategy
-from app.services.strategies.momentum_scalper import MomentumScalperStrategy
-from app.services.strategies.gap_fill import GapFillStrategy
-from app.services.strategies.micro_pullback import MicroPullbackStrategy
-from app.services.strategies.double_bottom_top import DoubleBottomTopStrategy
 from app.services.strategies.adx_trend import ADXTrendStrategy
-from app.services.strategies.golden_cross import GoldenCrossStrategy
 from app.services.strategies.keltner_breakout import KeltnerBreakoutStrategy
-from app.services.strategies.williams_r import WilliamsRStrategy
 from app.services.strategies.rsi2_mean_reversion import RSI2MeanReversionStrategy
-from app.services.strategies.stoch_rsi import StochRSIStrategy
-from app.services.strategies.smc_supply_demand import SMCSupplyDemandStrategy
-from app.services.strategies.mtf_ma_sr import MtfMaSRStrategy
-from app.services.strategies.smart_rsi import SmartRSIStrategy
 from app.services.strategies.smc_ict import SMCICTStrategy
+from app.services.strategies.orb_scalp import ORBScalpStrategy
+from app.services.strategies.trend_continuation import TrendContinuationStrategy
+from app.services.strategies.zero_dte_bull_put import ZeroDTEBullPutStrategy
+from app.services.strategies.vol_spike import VolSpikeStrategy
 
 logger = logging.getLogger(__name__)
 
 STRATEGY_MAP = {
-    "vwap_reversion":   VWAPReversionStrategy,
-    "orb":              ORBStrategy,
-    "ema_crossover":    EMACrossoverStrategy,
-    "volume_flow":      VolumeFlowStrategy,
-    "mtf_momentum":     MTFMomentumStrategy,
-    "rsi_divergence":   RSIDivergenceStrategy,
-    "bb_squeeze":       BBSqueezeStrategy,
-    "macd_reversal":    MACDReversalStrategy,
-    "momentum_scalper": MomentumScalperStrategy,
-    "gap_fill":         GapFillStrategy,
-    "micro_pullback":   MicroPullbackStrategy,
-    "double_bottom_top":DoubleBottomTopStrategy,
-    # Technical additions (Feb 2026)
+    "vwap_reversion":       VWAPReversionStrategy,
+    "ema_crossover":        EMACrossoverStrategy,
+    "mtf_momentum":         MTFMomentumStrategy,
     "adx_trend":            ADXTrendStrategy,
-    "golden_cross":         GoldenCrossStrategy,
     "keltner_breakout":     KeltnerBreakoutStrategy,
-    "williams_r":           WilliamsRStrategy,
-    # From user's TradingView screenshots (Feb 2026)
     "rsi2_mean_reversion":  RSI2MeanReversionStrategy,
-    "stoch_rsi":            StochRSIStrategy,
-    "smc_supply_demand":    SMCSupplyDemandStrategy,
-    "mtf_ma_sr":            MtfMaSRStrategy,
-    "smart_rsi":            SmartRSIStrategy,
-    # ICT Smart Money Concepts (A+/A/B confluence rating)
     "smc_ict":              SMCICTStrategy,
+    "orb_scalp":            ORBScalpStrategy,
+    "trend_continuation":   TrendContinuationStrategy,
+    "zero_dte_bull_put":    ZeroDTEBullPutStrategy,
+    "vol_spike":            VolSpikeStrategy,
 }
 
 # Regime -> preferred strategies
 REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
-        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
-        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "smc_ict",
+        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
+        "smc_ict", "orb_scalp", "trend_continuation",
     ],
     MarketRegime.TRENDING_DOWN: [
-        "orb", "ema_crossover", "mtf_momentum", "micro_pullback", "momentum_scalper",
-        "adx_trend", "golden_cross", "mtf_ma_sr", "rsi2_mean_reversion",
-        "smc_ict",
+        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
+        "smc_ict", "orb_scalp", "trend_continuation",
     ],
     MarketRegime.RANGE_BOUND: [
-        "vwap_reversion", "volume_flow", "rsi_divergence", "bb_squeeze",
-        "double_bottom_top", "williams_r", "stoch_rsi", "smart_rsi",
-        "smc_supply_demand", "smc_ict",
+        "vwap_reversion", "rsi2_mean_reversion", "smc_ict", "zero_dte_bull_put",
     ],
     MarketRegime.VOLATILE: [
-        "vwap_reversion", "volume_flow", "macd_reversal", "gap_fill",
-        "keltner_breakout", "williams_r", "smart_rsi", "smc_supply_demand",
-        "stoch_rsi",
+        "vwap_reversion", "keltner_breakout",
         # smc_ict intentionally excluded: VOLATILE skipped inside strategy
+        # vol_spike buys straddles to profit from IV expansion in volatile regimes
+        "vol_spike",
     ],
 }
 

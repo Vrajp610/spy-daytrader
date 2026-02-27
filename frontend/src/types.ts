@@ -320,3 +320,56 @@ export interface StrategyComparison {
   max_drawdown_pct: number;
   profit_factor: number;
 }
+
+// ── Portfolio Analytics ───────────────────────────────────────────
+
+export interface MonteCarloResult {
+  n_simulations: number;
+  n_days: number;
+  p5: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+  prob_loss: number;
+  prob_dd_5pct: number;
+}
+
+export interface PortfolioGreeks {
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  net_delta_notional: number;
+  portfolio_net_delta?: number;
+  open_position?: boolean;
+}
+
+export interface RollingStrategyPerf {
+  trades: number;
+  win_rate: number;
+  profit_factor: number;
+  total_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  cvar_95: number;
+  omega: number;
+  insufficient_data: boolean;
+  retire_recommended: boolean;
+}
+
+export interface PortfolioAnalyticsData {
+  equity: number;
+  initial_capital: number;
+  total_pnl: number;
+  total_trades: number;
+  cvar_95: number;
+  omega_ratio: number;
+  ulcer_index: number;
+  sortino_ratio: number;
+  greeks: PortfolioGreeks;
+  delta_adjusted_exposure_pct: number;
+  monte_carlo: MonteCarloResult;
+  rolling_90d: Record<string, RollingStrategyPerf>;
+  retire_recommendations: string[];
+}
