@@ -6,10 +6,18 @@ import type { LongTermBacktestResult } from '../types';
 
 type Tab = 'short' | 'long';
 
-const ALL_STRATEGIES = [
-  'vwap_reversion', 'orb', 'ema_crossover', 'volume_flow', 'mtf_momentum',
-  'rsi_divergence', 'bb_squeeze', 'macd_reversal', 'momentum_scalper',
-  'gap_fill', 'micro_pullback', 'double_bottom_top',
+// Short-term (1-min): 11 strategies with intraday signal logic
+const ST_STRATEGIES = [
+  'vwap_reversion', 'ema_crossover', 'mtf_momentum',
+  'adx_trend', 'keltner_breakout',
+  'rsi2_mean_reversion', 'smc_ict',
+  'orb_scalp', 'trend_continuation', 'zero_dte_bull_put', 'vol_spike',
+];
+
+// Long-term (daily bars): all 12 including theta_decay (LT-only credit spread)
+const LT_STRATEGIES = [
+  ...ST_STRATEGIES,
+  'theta_decay',
 ];
 
 // ── Date preset helpers ───────────────────────────────────────────────────────
@@ -50,7 +58,7 @@ function ShortTermTab() {
   const { results, current, loading, error, run, loadHistory } = useBacktest();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [strategy, setStrategy] = useState('vwap_reversion');
+  const [strategy, setStrategy] = useState(ST_STRATEGIES[0]);
   const [useRegime, setUseRegime] = useState(true);
   const [capital, setCapital] = useState(25000);
 
@@ -99,7 +107,7 @@ function ShortTermTab() {
         <div className="flex-1">
           <label className="label mb-1 block">Strategy</label>
           <select value={strategy} onChange={e => setStrategy(e.target.value)} className="select">
-            {ALL_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
+            {ST_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted mt-5 cursor-pointer">
@@ -173,7 +181,7 @@ function LongTermTab() {
   const [startDate, setStartDate] = useState(yearsAgo(10));
   const [endDate, setEndDate] = useState(today());
   const [capital, setCapital] = useState(25000);
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(ALL_STRATEGIES);
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(LT_STRATEGIES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<LongTermBacktestResult | null>(null);
@@ -252,9 +260,9 @@ function LongTermTab() {
 
       {/* Strategy multi-select */}
       <div className="mb-4">
-        <label className="label mb-1 block">Strategies ({selectedStrategies.length}/{ALL_STRATEGIES.length} selected)</label>
+        <label className="label mb-1 block">Strategies ({selectedStrategies.length}/{LT_STRATEGIES.length} selected)</label>
         <div className="flex flex-wrap gap-1.5">
-          {ALL_STRATEGIES.map(s => (
+          {LT_STRATEGIES.map(s => (
             <button
               key={s}
               onClick={() => toggleStrategy(s)}
