@@ -18,7 +18,7 @@ class LocalDataCache:
     def __init__(self, cache_dir: str = "./data_cache"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.max_age_hours = 24
+        self.max_age_hours = 7 * 24  # daily bars: 7-day TTL (no need to refresh multi-year cache daily)
 
     def _key(self, symbol: str, interval: str, start: str, end: str) -> Path:
         fname = f"{symbol}_{interval}_{start}_{end}.csv"
@@ -26,19 +26,50 @@ class LocalDataCache:
 
     def get(self, symbol: str, interval: str, start: str, end: str) -> pd.DataFrame | None:
         path = self._key(symbol, interval, start, end)
-        if not path.exists():
-            return None
-        age_hours = (time.time() - path.stat().st_mtime) / 3600
-        if age_hours > self.max_age_hours:
-            logger.info("Cache stale (%.1fh), refreshing %s", age_hours, path.name)
-            return None
+        if path.exists():
+            age_hours = (time.time() - path.stat().st_mtime) / 3600
+            if age_hours <= self.max_age_hours:
+                try:
+                    df = pd.read_csv(path, index_col=0, parse_dates=True)
+                    logger.info("Cache hit: %s (%d rows)", path.name, len(df))
+                    return df
+                except Exception as exc:
+                    logger.warning("Cache read error %s: %s", path.name, exc)
+            else:
+                logger.info("Cache stale (%.1fh), will try fuzzy fallback %s", age_hours, path.name)
+
+        # Fuzzy fallback: find any cached file with same symbol/interval/start whose
+        # end date is within 14 calendar days of the requested end.  This avoids a
+        # live yfinance download when only a few recent bars are missing (e.g. after
+        # a weekend) and the bulk of the historical data is already on disk.
         try:
-            df = pd.read_csv(path, index_col=0, parse_dates=True)
-            logger.info("Cache hit: %s (%d rows)", path.name, len(df))
-            return df
+            from datetime import datetime as _dt
+            req_end = _dt.strptime(end, "%Y-%m-%d")
+            prefix = f"{symbol}_{interval}_{start}_"
+            candidates = list(self.cache_dir.glob(f"{prefix}*.csv"))
+            for cpath in sorted(candidates, reverse=True):  # newest end-date first
+                cend_str = cpath.stem.replace(prefix, "")
+                try:
+                    cend = _dt.strptime(cend_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+                delta_days = abs((req_end - cend).days)
+                if delta_days <= 14:
+                    try:
+                        df = pd.read_csv(cpath, index_col=0, parse_dates=True)
+                        logger.info(
+                            "Cache fuzzy hit: %s (end Δ=%dd, %d rows)",
+                            cpath.name, delta_days, len(df),
+                        )
+                        # Re-save under the requested key so next call is exact
+                        self.save(symbol, interval, start, end, df)
+                        return df
+                    except Exception as exc:
+                        logger.warning("Cache fuzzy read error %s: %s", cpath.name, exc)
         except Exception as exc:
-            logger.warning("Cache read error %s: %s", path.name, exc)
-            return None
+            logger.debug("Cache fuzzy search error: %s", exc)
+
+        return None
 
     def save(self, symbol: str, interval: str, start: str, end: str, df: pd.DataFrame) -> None:
         path = self._key(symbol, interval, start, end)
