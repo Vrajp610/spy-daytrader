@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Trade } from '../types';
+import { formatExitReason } from '../utils/exitReason';
 
 interface Props {
   trades: Trade[];
@@ -159,7 +160,7 @@ export default function TradeHistory({ trades, total }: Props) {
                     ${t.pnl.toFixed(2)}
                   </td>
                   <td className="text-xxs text-muted hidden lg:table-cell">
-                    {t.exit_reason}
+                    {formatExitReason(t.exit_reason)}
                     {t.is_partial && <span className="ml-1 text-caution">(partial)</span>}
                   </td>
                 </tr>

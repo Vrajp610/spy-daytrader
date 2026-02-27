@@ -167,10 +167,12 @@ class TradingEngine:
             )
 
             # Populate in-memory closed_trades (oldest first) for daily helpers
+            # Include strategy so portfolio_analytics doesn't fall back to "unknown"
             self.paper_engine.closed_trades = [
                 {
                     "exit_time": (t.exit_time.isoformat() if t.exit_time else ""),
                     "pnl": t.pnl or 0.0,
+                    "strategy": t.strategy or "",
                 }
                 for t in reversed(recent_rows)
             ]

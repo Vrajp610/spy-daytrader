@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { WSMessage } from '../types';
+import { formatExitReason } from '../utils/exitReason';
 
 interface Alert {
   id: number;
@@ -200,7 +201,7 @@ export default function AlertsFeed({ lastMessage }: Props) {
                     <>
                       <span>{alert.contracts} ct @ ${Math.abs(alert.net_premium).toFixed(2)}</span>
                       {alert.exit_reason && (
-                        <span className="text-muted">{alert.exit_reason}</span>
+                        <span className="text-muted">{formatExitReason(alert.exit_reason)}</span>
                       )}
                       {alert.underlying_entry != null && alert.underlying_exit != null && (
                         <span>SPY ${alert.underlying_entry.toFixed(2)}→${alert.underlying_exit.toFixed(2)}</span>
