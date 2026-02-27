@@ -52,10 +52,6 @@ class Settings(BaseSettings):
     # always returns PROCEED (both are non-blocking fallbacks).
     anthropic_api_key: str = ""
 
-    # TradingView webhook secret — must match the {{secret}} placeholder in Pine Script alerts.
-    # Set via TRADINGVIEW_WEBHOOK_SECRET env var or .env file.
-    # Leave empty to disable secret verification (not recommended in production).
-    tradingview_webhook_secret: str = ""
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./spy_daytrader.db"
