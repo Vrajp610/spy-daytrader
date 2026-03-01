@@ -50,6 +50,7 @@ class TradeOut(BaseModel):
     underlying_entry: Optional[float] = None
     underlying_exit: Optional[float] = None
     contracts: Optional[int] = None
+    display: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

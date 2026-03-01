@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     credit_profit_target_pct: float = 0.50
     max_contracts_per_trade: int = 5           # scaled to $50k: 5 contracts default
     max_contracts_per_trade_theta: int = 50    # higher ceiling for theta-decay sizing
+    # Dynamic scaling: lift ceiling when confidence is high AND model has proven itself
+    max_contracts_high_confidence: int = 10    # ceiling at high confidence + good model
+    high_confidence_threshold: float = 0.85    # confidence required to lift ceiling
     weekly_credit_target: float = 2000.0       # target weekly credit collection ($)
     options_commission_per_contract: float = 0.65
     # Trailing stop: activate after this fraction of premium gained, then trail by trail_pct

@@ -6,6 +6,7 @@ import type {
   LongTermBacktestRequest, LongTermBacktestResult,
   PortfolioAnalyticsData, MonteCarloResult, PortfolioGreeks,
   RollingStrategyPerf,
+  CrisisBacktestResult, CrisisProgress,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -85,3 +86,11 @@ export const getRollingPerformance = (lookbackDays = 90) =>
   api.get<Record<string, RollingStrategyPerf>>('/analytics/rolling-performance', {
     params: { lookback_days: lookbackDays },
   }).then(r => r.data);
+
+// Crisis Backtesting
+export const runCrisisBacktest = (req: { strategies?: string[]; initial_capital?: number; windows?: string[] }) =>
+  api.post('/backtest/crisis', req).then(r => r.data);
+export const getCrisisProgress = () =>
+  api.get<CrisisProgress>('/backtest/crisis/progress').then(r => r.data);
+export const getCrisisResult = () =>
+  api.get<CrisisBacktestResult>('/backtest/crisis/result').then(r => r.data);

@@ -95,7 +95,19 @@ export default function TradeHistory({ trades, total }: Props) {
           <tbody>
             {sorted.length === 0 ? (
               <tr><td colSpan={9} className="px-3 py-6 text-center text-muted">No trades yet — tap a row to expand details</td></tr>
-            ) : sorted.map((t, i) => (
+            ) : sorted.map((t, i) => {
+              // Parse legs_json to show all legs for multi-leg positions (spreads, condors, etc.)
+              type ParsedLeg = { strike: number; option_type: string; action: string; premium: number; delta: number; expiration: string };
+              let parsedLegs: ParsedLeg[] | null = null;
+              if (t.legs_json) {
+                try { parsedLegs = JSON.parse(t.legs_json); } catch { /* ignore */ }
+              }
+              const isMultiLeg = parsedLegs && parsedLegs.length > 1;
+              const strikesDisplay = isMultiLeg
+                ? parsedLegs!.map(l => `$${l.strike.toFixed(0)}${l.option_type[0]}`).join('/')
+                : t.strike != null ? `$${t.strike.toFixed(0)}${t.option_type?.[0] || ''}` : null;
+
+              return (
               <>
                 <tr
                   key={`row-${i}`}
@@ -111,9 +123,9 @@ export default function TradeHistory({ trades, total }: Props) {
                         <span className="badge badge-paper text-xxs px-1.5">
                           {TYPE_ABBREV[t.option_strategy_type!] || t.option_strategy_type}
                         </span>
-                        {t.strike != null && t.expiration_date && (
+                        {strikesDisplay && t.expiration_date && (
                           <div className="text-terminal-300 mt-0.5">
-                            ${t.strike.toFixed(0)}{t.option_type?.[0] || ''}{' '}
+                            {strikesDisplay}{' '}
                             {t.expiration_date.slice(5)}
                           </div>
                         )}
@@ -230,17 +242,36 @@ export default function TradeHistory({ trades, total }: Props) {
                                 <span className="font-mono text-terminal-200">${t.underlying_exit.toFixed(2)}</span>
                               </div>
                             )}
-                            {t.strike != null && (
-                              <div>
-                                <span className="label">Strike</span>{' '}
-                                <span className="font-mono text-terminal-200">${t.strike.toFixed(0)} {t.option_type || ''}</span>
+                            {isMultiLeg ? (
+                              <div className="col-span-2 md:col-span-4">
+                                <span className="label block mb-1">Legs</span>
+                                <div className="font-mono text-terminal-200 text-xxs space-y-0.5">
+                                  {parsedLegs!.map((leg, li) => (
+                                    <div key={li}>
+                                      <span className="text-muted">{leg.action.replace(/_/g, ' ')}</span>{' '}
+                                      {leg.option_type} ${leg.strike.toFixed(0)}{' '}
+                                      <span className="text-muted">exp</span> {leg.expiration.slice(5)}{' '}
+                                      @ ${leg.premium.toFixed(2)}{' '}
+                                      <span className="text-muted">Δ</span>{leg.delta.toFixed(3)}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            )}
-                            {t.expiration_date && (
-                              <div>
-                                <span className="label">Expiration</span>{' '}
-                                <span className="font-mono text-terminal-200">{t.expiration_date}</span>
-                              </div>
+                            ) : (
+                              <>
+                                {t.strike != null && (
+                                  <div>
+                                    <span className="label">Strike</span>{' '}
+                                    <span className="font-mono text-terminal-200">${t.strike.toFixed(0)} {t.option_type || ''}</span>
+                                  </div>
+                                )}
+                                {t.expiration_date && (
+                                  <div>
+                                    <span className="label">Expiration</span>{' '}
+                                    <span className="font-mono text-terminal-200">{t.expiration_date}</span>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </>
                         )}
@@ -291,7 +322,8 @@ export default function TradeHistory({ trades, total }: Props) {
                   </tr>
                 )}
               </>
-            ))}
+              );
+            })}
           </tbody>
           {sorted.length > 0 && (() => {
             const totalPnl = sorted.reduce((s, t) => s + t.pnl, 0);

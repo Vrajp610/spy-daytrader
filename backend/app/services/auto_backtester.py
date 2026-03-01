@@ -80,7 +80,7 @@ def _date_ranges() -> list[dict]:
     ]
 
 
-def _compute_lt_composite(result) -> float:
+def _compute_lt_composite(result, crisis_composite: float | None = None) -> float:
     """
     Compute long-term composite score on the same -20..100 scale as short-term.
 
@@ -95,6 +95,13 @@ def _compute_lt_composite(result) -> float:
       WinRate: 50%=50, 100%=100
       MaxDD:   0%=100, 20%=0, 40%=-100           (lower is better)
       Yearly consistency: % of profitable years scaled to ±15 pts bonus/penalty
+
+    crisis_composite (optional, 0..1 scale from CrisisBacktester):
+      Applied as a multiplier after base score is computed.
+      Resilient (≥0.7): ×1.15 bonus
+      Neutral  (0.4–0.7): ×1.0 unchanged
+      Underperforming (0.1–0.4): ×0.85 penalty
+      Vulnerable (<0.1): ×0.70 significant penalty
     """
     MIN_TRADES_FOR_LT_SCORE = 10
     if result.total_trades < MIN_TRADES_FOR_LT_SCORE:
@@ -121,7 +128,7 @@ def _compute_lt_composite(result) -> float:
         # Scale: 70%+ profitable years → +15, 50% → 0, <30% → -15
         yearly_bonus = (profitable_pct - 0.5) * 30.0   # range: -15 to +15
 
-    return round(
+    base_score = round(
         0.25 * sharpe_score
         + 0.20 * cagr_score
         + 0.20 * pf_score
@@ -131,6 +138,27 @@ def _compute_lt_composite(result) -> float:
         + yearly_bonus,
         2,
     )
+
+    # Crisis robustness multiplier — adjust score based on crisis composite
+    if crisis_composite is not None:
+        if crisis_composite >= 0.7:
+            mult = 1.15   # resilient: +15% bonus
+        elif crisis_composite >= 0.4:
+            mult = 1.0    # neutral: unchanged
+        elif crisis_composite >= 0.1:
+            mult = 0.85   # underperforming: -15% penalty
+        else:
+            mult = 0.70   # vulnerable: -30% significant penalty
+        # Only apply multiplier to positive scores (don't penalise already-negative)
+        if base_score > 0:
+            adjusted = round(base_score * mult, 2)
+            logger.info(
+                f"LT composite crisis adjustment: base={base_score:.1f} "
+                f"crisis_composite={crisis_composite:.3f} mult={mult:.2f} → {adjusted:.1f}"
+            )
+            return adjusted
+
+    return base_score
 
 
 def _blend(st: float, lt: float | None) -> float:
@@ -652,9 +680,24 @@ class AutoBacktester:
             from app.models import StrategyRanking
             from sqlalchemy import select
 
+            # Load crisis composite scores if available
+            crisis_composites: dict[str, float] = {}
+            try:
+                from app.services.crisis_backtester import crisis_backtester
+                cr = crisis_backtester.result
+                if cr:
+                    for ranking in cr["report"]["strategy_rankings"]:
+                        crisis_composites[ranking["strategy"]] = ranking["crisis_composite"]
+                    logger.info(
+                        f"Crisis composites loaded for {len(crisis_composites)} strategies"
+                    )
+            except Exception as ce:
+                logger.debug(f"Could not load crisis composites: {ce}")
+
             async with async_session() as db:
                 for strat_name, result in lt_results.items():
-                    lt_composite = _compute_lt_composite(result)
+                    cc = crisis_composites.get(strat_name)
+                    lt_composite = _compute_lt_composite(result, crisis_composite=cc)
 
                     stmt = select(StrategyRanking).where(
                         StrategyRanking.strategy_name == strat_name

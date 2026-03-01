@@ -38,13 +38,12 @@ class LocalDataCache:
             else:
                 logger.info("Cache stale (%.1fh), will try fuzzy fallback %s", age_hours, path.name)
 
-        # Fuzzy fallback: find any cached file with same symbol/interval/start whose
-        # end date is within 14 calendar days of the requested end.  This avoids a
-        # live yfinance download when only a few recent bars are missing (e.g. after
-        # a weekend) and the bulk of the historical data is already on disk.
+        # Fuzzy fallback 1: same-start files with end date within 14 days of requested.
+        # (handles the case where only a few recent bars are missing)
         try:
             from datetime import datetime as _dt
-            req_end = _dt.strptime(end, "%Y-%m-%d")
+            req_start = _dt.strptime(start, "%Y-%m-%d")
+            req_end   = _dt.strptime(end,   "%Y-%m-%d")
             prefix = f"{symbol}_{interval}_{start}_"
             candidates = list(self.cache_dir.glob(f"{prefix}*.csv"))
             for cpath in sorted(candidates, reverse=True):  # newest end-date first
@@ -61,13 +60,50 @@ class LocalDataCache:
                             "Cache fuzzy hit: %s (end Δ=%dd, %d rows)",
                             cpath.name, delta_days, len(df),
                         )
-                        # Re-save under the requested key so next call is exact
                         self.save(symbol, interval, start, end, df)
                         return df
                     except Exception as exc:
                         logger.warning("Cache fuzzy read error %s: %s", cpath.name, exc)
         except Exception as exc:
             logger.debug("Cache fuzzy search error: %s", exc)
+
+        # Fuzzy fallback 2: sub-range slice — find any cached file for this symbol/interval
+        # whose range fully contains [start, end], then slice and return.
+        # This allows a 2010→2026 cache to serve a 2010→2019 request.
+        try:
+            from datetime import datetime as _dt
+            req_start = _dt.strptime(start, "%Y-%m-%d")
+            req_end   = _dt.strptime(end,   "%Y-%m-%d")
+            pat = f"{symbol}_{interval}_*_*.csv"
+            all_candidates = list(self.cache_dir.glob(pat))
+            for cpath in sorted(all_candidates, reverse=True):
+                parts = cpath.stem.split("_")
+                # filename: SYMBOL_1d_START_END → parts[-2] = start, parts[-1] = end
+                if len(parts) < 4:
+                    continue
+                try:
+                    cstart = _dt.strptime(parts[-2], "%Y-%m-%d")
+                    cend   = _dt.strptime(parts[-1], "%Y-%m-%d")
+                except ValueError:
+                    continue
+                # Check if cached range fully contains the requested range
+                if cstart <= req_start and cend >= req_end:
+                    try:
+                        df = pd.read_csv(cpath, index_col=0, parse_dates=True)
+                        # Slice to the requested date range
+                        df.index = pd.to_datetime(df.index)
+                        sliced = df[(df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))]
+                        if len(sliced) >= 30:
+                            logger.info(
+                                "Cache sub-range hit: %s → sliced to %s/%s (%d rows)",
+                                cpath.name, start, end, len(sliced),
+                            )
+                            self.save(symbol, interval, start, end, sliced)
+                            return sliced
+                    except Exception as exc:
+                        logger.warning("Cache sub-range read error %s: %s", cpath.name, exc)
+        except Exception as exc:
+            logger.debug("Cache sub-range search error: %s", exc)
 
         return None
 
@@ -91,8 +127,80 @@ class LocalDataCache:
         return files
 
 
+def _fetch_yahoo_v8_raw(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Fetch daily OHLCV directly via Yahoo Finance v8 API (no yfinance dependency).
+    Returns a DataFrame with date index and OHLCV columns (adj_close used as close).
+    """
+    import requests
+    from datetime import datetime as _dt
+
+    start_ts = int(_dt.strptime(start, "%Y-%m-%d").timestamp())
+    end_ts   = int(_dt.strptime(end,   "%Y-%m-%d").timestamp()) + 86400  # include last day
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {"interval": "1d", "period1": start_ts, "period2": end_ts, "events": "history"}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; spy-daytrader/1.0)"}
+
+    r = requests.get(url, params=params, headers=headers, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+
+    result_list = data.get("chart", {}).get("result")
+    if not result_list:
+        raise ValueError(f"Yahoo v8 API returned no result for {symbol} {start}→{end}")
+
+    result   = result_list[0]
+    timestamps = result.get("timestamp", [])
+    if not timestamps:
+        raise ValueError(f"No timestamps in Yahoo v8 result for {symbol} {start}→{end}")
+
+    quote    = result["indicators"]["quote"][0]
+    raw_close = quote["close"]
+    adjclose  = result["indicators"].get("adjclose", [{}])[0].get("adjclose", raw_close)
+
+    idx = pd.to_datetime(timestamps, unit="s").normalize()
+
+    # Yahoo v8 returns split-adjusted-only open/high/low but dividend+split-adjusted close.
+    # To keep all OHLCV on the same adjusted scale, compute the per-bar ratio and apply it.
+    raw_close_s = pd.Series(raw_close, index=idx, dtype=float)
+    adj_close_s = pd.Series(adjclose,  index=idx, dtype=float)
+    # Ratio: adjclose / raw_close (e.g. ~0.68 for 2003 data with 20+ years of dividends)
+    adj_ratio   = (adj_close_s / raw_close_s.replace(0.0, np.nan)).fillna(1.0)
+
+    df = pd.DataFrame({
+        "open":   pd.Series(quote["open"],   index=idx, dtype=float) * adj_ratio,
+        "high":   pd.Series(quote["high"],   index=idx, dtype=float) * adj_ratio,
+        "low":    pd.Series(quote["low"],    index=idx, dtype=float) * adj_ratio,
+        "close":  adj_close_s,   # already fully adjusted
+        "volume": pd.Series(quote["volume"], index=idx, dtype=float),
+    })
+    df.index.name = "date"
+    df = df.dropna(subset=["open", "high", "low", "close"])
+    df = df[df["volume"] > 0]
+    df = df.sort_index()
+    df["adj_close"] = df["close"]
+    return df
+
+
 def _fetch_yahoo_daily(symbol: str, start: str, end: str) -> pd.DataFrame:
-    """Fetch daily OHLCV via yfinance (handles auth/rate-limiting automatically)."""
+    """
+    Fetch daily OHLCV for symbol between start and end.
+
+    Strategy:
+    1. Try the raw Yahoo v8 API (works without yfinance auth).
+    2. Fall back to yfinance.download() if the raw call fails.
+    """
+    # Primary: direct Yahoo Finance v8 API
+    try:
+        df = _fetch_yahoo_v8_raw(symbol, start, end)
+        if not df.empty:
+            logger.info("Fetched %d rows via Yahoo v8 raw API (%s %s→%s)", len(df), symbol, start, end)
+            return df
+    except Exception as exc:
+        logger.warning("Yahoo v8 raw API failed for %s %s→%s: %s — falling back to yfinance", symbol, start, end, exc)
+
+    # Fallback: yfinance
     raw = yf.download(
         symbol,
         start=start,

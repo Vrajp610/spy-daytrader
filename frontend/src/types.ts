@@ -100,6 +100,7 @@ export interface Trade {
   underlying_entry?: number;
   underlying_exit?: number;
   contracts?: number;
+  display?: string;
 }
 
 export interface AccountInfo {
@@ -372,4 +373,47 @@ export interface PortfolioAnalyticsData {
   monte_carlo: MonteCarloResult;
   rolling_90d: Record<string, RollingStrategyPerf>;
   retire_recommendations: string[];
+}
+
+// ── Crisis Backtesting ────────────────────────────────────────────
+
+export interface CrisisWindowResult {
+  label: string;
+  period: string;
+  is_crisis: boolean;
+  scenarios: Record<string, LongTermBacktestResult>;
+}
+
+export interface CrisisStrategyRanking {
+  strategy: string;
+  crisis_sharpe: number;
+  normal_sharpe: number;
+  crisis_max_dd: number;
+  crisis_composite: number;
+  badge: 'resilient' | 'vulnerable' | 'neutral' | 'stress_sensitive';
+}
+
+export interface CrisisReport {
+  crisis_resilient: string[];
+  crisis_vulnerable: string[];
+  stress_sensitive: string[];
+  strategy_rankings: CrisisStrategyRanking[];
+  recommendations: Record<string, string>;
+  action_plan: { priority: number; strategy: string; action: 'KEEP' | 'REFINE' | 'RETIRE'; reason: string }[];
+}
+
+export interface CrisisBacktestResult {
+  windows: Record<string, CrisisWindowResult>;
+  report: CrisisReport;
+  data_note: string;
+}
+
+export interface CrisisProgress {
+  status: 'idle' | 'running' | 'done' | 'error';
+  current_window: string;
+  current_scenario: string;
+  completed: number;
+  total: number;
+  errors: number;
+  last_run: string | null;
 }

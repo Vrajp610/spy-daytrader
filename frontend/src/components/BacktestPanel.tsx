@@ -3,8 +3,9 @@ import { useBacktest } from '../hooks/useBacktest';
 import Chart from './Chart';
 import { runLongTermBacktest } from '../services/api';
 import type { LongTermBacktestResult } from '../types';
+import CrisisAnalysis from './CrisisAnalysis';
 
-type Tab = 'short' | 'long';
+type Tab = 'short' | 'long' | 'crisis';
 
 // Short-term (1-min): 11 strategies with intraday signal logic
 const ST_STRATEGIES = [
@@ -365,17 +366,17 @@ export default function BacktestPanel() {
         <div className="flex rounded-md border border-terminal-600/40 overflow-hidden">
           <button
             onClick={() => setTab('short')}
-            className={`px-3 py-1 text-xs transition-colors ${
+            className={`px-3 py-1 text-xs transition-colors border-r border-terminal-600/40 ${
               tab === 'short'
-                ? 'bg-accent/20 text-accent border-r border-terminal-600/40'
-                : 'text-terminal-400 hover:bg-terminal-700/40 border-r border-terminal-600/40'
+                ? 'bg-accent/20 text-accent'
+                : 'text-terminal-400 hover:bg-terminal-700/40'
             }`}
           >
             Short-Term
           </button>
           <button
             onClick={() => setTab('long')}
-            className={`px-3 py-1 text-xs transition-colors ${
+            className={`px-3 py-1 text-xs transition-colors border-r border-terminal-600/40 ${
               tab === 'long'
                 ? 'bg-accent/20 text-accent'
                 : 'text-terminal-400 hover:bg-terminal-700/40'
@@ -383,10 +384,22 @@ export default function BacktestPanel() {
           >
             Long-Term (10–15Y)
           </button>
+          <button
+            onClick={() => setTab('crisis')}
+            className={`px-3 py-1 text-xs transition-colors ${
+              tab === 'crisis'
+                ? 'bg-accent/20 text-accent'
+                : 'text-terminal-400 hover:bg-terminal-700/40'
+            }`}
+          >
+            Crisis Analysis
+          </button>
         </div>
       </div>
 
-      {tab === 'short' ? <ShortTermTab /> : <LongTermTab />}
+      {tab === 'short'  && <ShortTermTab />}
+      {tab === 'long'   && <LongTermTab />}
+      {tab === 'crisis' && <CrisisAnalysis />}
     </div>
   );
 }

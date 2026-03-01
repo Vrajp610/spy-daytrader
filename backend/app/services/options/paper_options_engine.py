@@ -242,6 +242,8 @@ class PaperOptionsEngine:
             "underlying_entry": round(pos.entry_underlying, 2),
             "underlying_exit": round(underlying_price, 2),
             "contracts": order.contracts,
+            # Human-readable description including all legs (e.g. "CDS: $590C/$595C, ...")
+            "display": order.to_display_string(),
             # Market context at entry (populated by trading_engine before open_position)
             "regime": order.regime if order.regime else "RANGE_BOUND",
         }

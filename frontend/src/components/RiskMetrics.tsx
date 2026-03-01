@@ -34,8 +34,8 @@ export default function RiskMetricsCard({ risk }: Props) {
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
           <p className="label">Daily Loss</p>
-          <p className={`data-value ${risk.daily_loss < 0 ? 'text-loss' : ''}`}>
-            ${risk.daily_loss.toFixed(2)} / -${risk.daily_loss_limit.toFixed(2)}
+          <p className={`data-value ${risk.daily_loss < 0 ? 'text-loss' : 'text-profit'}`}>
+            {risk.daily_loss >= 0 ? '+' : ''}${risk.daily_loss.toFixed(2)}
           </p>
         </div>
         <div>

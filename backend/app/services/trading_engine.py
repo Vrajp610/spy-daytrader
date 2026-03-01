@@ -47,28 +47,40 @@ ET = ZoneInfo("America/New_York")
 
 REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
-        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
-        "smc_ict", "theta_decay", "orb_scalp", "trend_continuation",
+        "ema_crossover", "mtf_momentum", "adx_trend", "keltner_breakout",
+        "rsi2_mean_reversion", "smc_ict", "theta_decay", "orb_scalp",
+        "trend_continuation", "zero_dte_bull_put",
     ],
     MarketRegime.TRENDING_DOWN: [
-        "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
-        "smc_ict", "theta_decay", "orb_scalp", "trend_continuation",
+        "ema_crossover", "mtf_momentum", "adx_trend", "keltner_breakout",
+        "rsi2_mean_reversion", "smc_ict", "theta_decay", "orb_scalp",
+        "trend_continuation",
     ],
     MarketRegime.RANGE_BOUND: [
-        "vwap_reversion", "rsi2_mean_reversion", "smc_ict", "theta_decay",
-        "zero_dte_bull_put",
+        # Credit / premium strategies — ideal in low-vol range-bound days
+        "theta_decay", "zero_dte_bull_put",
+        # Breakout / momentum — captures moves when range breaks
+        "keltner_breakout", "orb_scalp", "adx_trend",
+        # Mean-reversion — trades reversals at range extremes
+        "vwap_reversion", "rsi2_mean_reversion", "smc_ict",
+        # Broad fallback
+        "ema_crossover",
     ],
     MarketRegime.VOLATILE: [
-        "vwap_reversion", "keltner_breakout",
-        # smc_ict + theta_decay excluded: VOLATILE skipped inside each strategy
+        "keltner_breakout", "adx_trend",
         # vol_spike buys straddles to profit from IV expansion
         "vol_spike",
+        # vwap_reversion works in volatile intraday swings
+        "vwap_reversion",
     ],
 }
 
-# Minimum blended composite score to allow a strategy to trade
-# (calibrated from live losses: momentum_scalper=-6.5, adx_trend=-8.2 both lost)
-MIN_COMPOSITE_SCORE_TO_TRADE = 5.0
+# Minimum blended composite score to allow a strategy to trade.
+# Lowered from 5.0 → -10.0 so strategies with slight LT underperformance
+# (like rsi2_mean_reversion at -4.77, smc_ict at -4.73) can still trade
+# intraday. Live auto-disable (5 consecutive losses / WR<35% over 20 trades)
+# is the primary safety mechanism; this gate only catches clearly broken strategies.
+MIN_COMPOSITE_SCORE_TO_TRADE = -10.0
 
 
 class TradingEngine:
@@ -588,6 +600,7 @@ class TradingEngine:
             regime=self.current_regime,
             iv_rank=chain_iv_rank,
             vix=self._current_vix,
+            vix_daily_move_pct=self._current_vix / 16.0,
         )
 
         # Collect all signals from eligible strategies
@@ -719,6 +732,14 @@ class TradingEngine:
         candidates.sort(key=lambda x: x[2], reverse=True)
         strat_name, signal, score = candidates[0]
 
+        # Retrieve raw blended composite score for the winning strategy (used for sizing).
+        # blended_perf range: -20 to 100+. Used in calculate_contracts to scale position size.
+        _bt_score = self._strategy_scores.get(strat_name)
+        _blended_perf: float = (
+            strategy_monitor.get_blended_score(strat_name, _bt_score)
+            if _bt_score is not None else 0.0
+        )
+
         regime_str = self.current_regime.value
 
         # ── Trade memory: compare to similar historical setups ────────────────
@@ -803,6 +824,7 @@ class TradingEngine:
         order = self.options_selector.select(
             signal, self.current_regime, self._current_chain,
             self.paper_engine.capital, risk_fraction,
+            vix_daily_move_pct=self._current_vix / 16.0,
         )
         if order is None:
             logger.debug(f"Options selector returned None for {strat_name}")
@@ -812,6 +834,8 @@ class TradingEngine:
         open_risk = self.paper_engine.open_risk
         contracts = options_sizing.calculate_contracts(
             order, self.paper_engine.capital, risk_fraction, open_risk,
+            blended_score=_blended_perf, confidence=signal.confidence,
+            vix_daily_move_pct=self._current_vix / 16.0,
         )
         if contracts <= 0:
             return

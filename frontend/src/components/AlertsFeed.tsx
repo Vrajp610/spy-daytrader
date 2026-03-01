@@ -9,7 +9,7 @@ interface Alert {
   option_strategy_type: string;
   contracts: number;
   net_premium: number;
-  display: string;
+  display?: string;
   max_loss?: number;
   max_profit?: number;
   pnl?: number;
@@ -72,7 +72,6 @@ export default function AlertsFeed({ lastMessage }: Props) {
       option_strategy_type: (data.option_strategy_type as string) ?? '',
       contracts: (data.contracts as number) ?? (data.quantity as number) ?? 0,
       net_premium: (data.net_premium as number) ?? 0,
-      display: (data.display as string) ?? '',
       max_loss: data.max_loss as number | undefined,
       max_profit: data.max_profit as number | undefined,
       pnl: data.pnl as number | undefined,
@@ -89,6 +88,7 @@ export default function AlertsFeed({ lastMessage }: Props) {
       underlying_exit: data.underlying_exit as number | undefined,
       entry_delta: data.entry_delta as number | undefined,
       entry_iv: data.entry_iv as number | undefined,
+      display: data.display as string | undefined,
     };
 
     setAlerts(prev => [alert, ...prev].slice(0, MAX_ALERTS));

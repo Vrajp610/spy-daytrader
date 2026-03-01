@@ -26,8 +26,13 @@ class OptionsSelector:
         chain: OptionChainSnapshot,
         capital: float,
         risk_fraction: float,
+        vix_daily_move_pct: float = 1.25,
     ) -> Optional[OptionsOrder]:
         """Select the best options structure for the given signal and regime.
+
+        Args:
+            vix_daily_move_pct: VIX/16 = 1-sigma expected daily move %.
+                Credit spread short legs are placed at least 1σ away from price.
 
         Returns an OptionsOrder with specific legs, or None if no suitable trade.
         """
@@ -62,6 +67,7 @@ class OptionsSelector:
         order = self._build_order(
             strategy_type, signal, chain, expiration, capital, risk_fraction,
             target_delta=target_delta, fallback_delta=fallback_delta,
+            vix_daily_move_pct=vix_daily_move_pct,
         )
         return order
 
@@ -209,6 +215,7 @@ class OptionsSelector:
         risk_fraction: float,
         target_delta: Optional[float] = None,
         fallback_delta: Optional[float] = None,
+        vix_daily_move_pct: float = 1.25,
     ) -> Optional[OptionsOrder]:
         """Build the complete OptionsOrder with legs."""
         price = chain.underlying_price
@@ -221,12 +228,12 @@ class OptionsSelector:
         if strategy_type == OptionsStrategyType.PUT_CREDIT_SPREAD:
             return self._build_put_credit_spread(
                 chain, expiration, price, spread_width, target_delta, fallback_delta,
-                signal, capital, risk_fraction,
+                signal, capital, risk_fraction, vix_daily_move_pct=vix_daily_move_pct,
             )
         elif strategy_type == OptionsStrategyType.CALL_CREDIT_SPREAD:
             return self._build_call_credit_spread(
                 chain, expiration, price, spread_width, target_delta, fallback_delta,
-                signal, capital, risk_fraction,
+                signal, capital, risk_fraction, vix_daily_move_pct=vix_daily_move_pct,
             )
         elif strategy_type == OptionsStrategyType.CALL_DEBIT_SPREAD:
             return self._build_call_debit_spread(
@@ -241,7 +248,7 @@ class OptionsSelector:
         elif strategy_type == OptionsStrategyType.IRON_CONDOR:
             return self._build_iron_condor(
                 chain, expiration, price, spread_width, target_delta,
-                signal, capital, risk_fraction,
+                signal, capital, risk_fraction, vix_daily_move_pct=vix_daily_move_pct,
             )
         elif strategy_type == OptionsStrategyType.LONG_STRADDLE:
             return self._build_long_straddle(
@@ -294,6 +301,37 @@ class OptionsSelector:
         price = chain.underlying_price
         return min(strikes, key=lambda s: abs(s - price))
 
+    def _find_sigma_strike_otm(
+        self,
+        chain: OptionChainSnapshot,
+        expiration: str,
+        option_type: OptionType,
+        underlying_price: float,
+        sigma_distance: float,
+    ) -> Optional[float]:
+        """Find the nearest available strike that is at least sigma_distance OTM.
+
+        For PUT: returns the highest strike at or below (price - sigma_distance).
+        For CALL: returns the lowest strike at or above (price + sigma_distance).
+
+        Expert credit traders use 1σ as the minimum distance for the short leg
+        so they are always 'selling outside the expected move'.
+        Returns None if no strike exists at or beyond that distance.
+        """
+        strikes = chain.strikes_for_expiration(expiration)
+        if not strikes:
+            return None
+
+        if option_type == OptionType.PUT:
+            threshold = underlying_price - sigma_distance
+            candidates = [s for s in strikes if s <= threshold]
+            return max(candidates) if candidates else None  # highest strike still OTM enough
+
+        # CALL
+        threshold = underlying_price + sigma_distance
+        candidates = [s for s in strikes if s >= threshold]
+        return min(candidates) if candidates else None  # lowest strike still OTM enough
+
     def _size_contracts(
         self, max_loss_per_contract: float, capital: float, risk_fraction: float,
     ) -> int:
@@ -306,15 +344,33 @@ class OptionsSelector:
 
     def _build_put_credit_spread(
         self, chain, expiration, price, spread_width, target_delta, fallback_delta,
-        signal, capital, risk_fraction,
+        signal, capital, risk_fraction, vix_daily_move_pct: float = 1.25,
     ) -> Optional[OptionsOrder]:
-        """Sell higher put, buy lower put."""
+        """Sell higher put, buy lower put.
+
+        VIX/16 rule: short leg is placed at the farther-OTM of (delta-based strike,
+        1σ minimum distance strike). Expert credit traders never sell inside the
+        expected move.
+        """
         short_strike = self._find_strike_by_delta(chain, expiration, OptionType.PUT, target_delta)
         if short_strike is None and fallback_delta != target_delta:
             short_strike = self._find_strike_by_delta(chain, expiration, OptionType.PUT, fallback_delta)
             logger.debug(f"put_credit_spread: fell back to delta {fallback_delta} for short strike")
         if short_strike is None:
             return None
+
+        # VIX/16: enforce short leg is at least 1σ below current price.
+        # If delta-based strike is too close to ATM, move it out to the sigma threshold.
+        one_sigma_pts = price * (vix_daily_move_pct / 100.0)
+        sigma_strike = self._find_sigma_strike_otm(
+            chain, expiration, OptionType.PUT, price, one_sigma_pts
+        )
+        if sigma_strike is not None and short_strike > sigma_strike:
+            logger.debug(
+                f"put_credit_spread: VIX/16 moved short strike {short_strike}→{sigma_strike} "
+                f"(1σ={one_sigma_pts:.1f}pt, vix_move={vix_daily_move_pct:.2f}%)"
+            )
+            short_strike = sigma_strike
 
         long_strike = short_strike - spread_width
         short_leg_data = chain.get_put(expiration, short_strike)
@@ -394,15 +450,31 @@ class OptionsSelector:
 
     def _build_call_credit_spread(
         self, chain, expiration, price, spread_width, target_delta, fallback_delta,
-        signal, capital, risk_fraction,
+        signal, capital, risk_fraction, vix_daily_move_pct: float = 1.25,
     ) -> Optional[OptionsOrder]:
-        """Sell lower call, buy higher call."""
+        """Sell lower call, buy higher call.
+
+        VIX/16 rule: short leg is placed at the farther-OTM of (delta-based strike,
+        1σ minimum distance strike).
+        """
         short_strike = self._find_strike_by_delta(chain, expiration, OptionType.CALL, target_delta)
         if short_strike is None and fallback_delta != target_delta:
             short_strike = self._find_strike_by_delta(chain, expiration, OptionType.CALL, fallback_delta)
             logger.debug(f"call_credit_spread: fell back to delta {fallback_delta} for short strike")
         if short_strike is None:
             return None
+
+        # VIX/16: enforce short leg is at least 1σ above current price.
+        one_sigma_pts = price * (vix_daily_move_pct / 100.0)
+        sigma_strike = self._find_sigma_strike_otm(
+            chain, expiration, OptionType.CALL, price, one_sigma_pts
+        )
+        if sigma_strike is not None and short_strike < sigma_strike:
+            logger.debug(
+                f"call_credit_spread: VIX/16 moved short strike {short_strike}→{sigma_strike} "
+                f"(1σ={one_sigma_pts:.1f}pt, vix_move={vix_daily_move_pct:.2f}%)"
+            )
+            short_strike = sigma_strike
 
         long_strike = short_strike + spread_width
         short_leg_data = chain.get_call(expiration, short_strike)
@@ -639,19 +711,42 @@ class OptionsSelector:
 
     def _build_iron_condor(
         self, chain, expiration, price, spread_width, target_delta,
-        signal, capital, risk_fraction,
+        signal, capital, risk_fraction, vix_daily_move_pct: float = 1.25,
     ) -> Optional[OptionsOrder]:
-        """Put credit spread + call credit spread."""
+        """Put credit spread + call credit spread.
+
+        VIX/16 rule: both short legs placed at least 1σ from current price.
+        Selling inside the expected move on an iron condor risks both sides being
+        tested simultaneously during a volatility expansion.
+        """
+        one_sigma_pts = price * (vix_daily_move_pct / 100.0)
+
         # Put side
         put_short = self._find_strike_by_delta(chain, expiration, OptionType.PUT, target_delta)
         if put_short is None:
             return None
+        # Enforce 1σ minimum distance
+        sigma_put = self._find_sigma_strike_otm(chain, expiration, OptionType.PUT, price, one_sigma_pts)
+        if sigma_put is not None and put_short > sigma_put:
+            logger.debug(
+                f"iron_condor: VIX/16 moved put short {put_short}→{sigma_put} "
+                f"(1σ={one_sigma_pts:.1f}pt)"
+            )
+            put_short = sigma_put
         put_long = put_short - spread_width
 
         # Call side
         call_short = self._find_strike_by_delta(chain, expiration, OptionType.CALL, target_delta)
         if call_short is None:
             return None
+        # Enforce 1σ minimum distance
+        sigma_call = self._find_sigma_strike_otm(chain, expiration, OptionType.CALL, price, one_sigma_pts)
+        if sigma_call is not None and call_short < sigma_call:
+            logger.debug(
+                f"iron_condor: VIX/16 moved call short {call_short}→{sigma_call} "
+                f"(1σ={one_sigma_pts:.1f}pt)"
+            )
+            call_short = sigma_call
         call_long = call_short + spread_width
 
         ps = chain.get_put(expiration, put_short)

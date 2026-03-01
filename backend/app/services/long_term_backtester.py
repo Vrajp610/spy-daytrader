@@ -13,16 +13,31 @@ from app.services.historical_data import HistoricalDataManager
 
 logger = logging.getLogger(__name__)
 
-# Core 12 strategies (pruned Feb 2026 — removed 16 redundant/underperforming strategies)
+# Core 12 strategies ordered by crisis composite score (recalibrated Feb 2026 with
+# corrected adjusted-price data — all OHLCV columns fully dividend-adjusted).
+# Order matters: the LT backtester uses first-signal-wins, so highest crisis-resilience
+# strategies get priority to capture the best trades before weaker ones fire.
+# Crisis composites (corrected): theta_decay=1.000, keltner_breakout=0.810,
+#   adx_trend=0.543, rsi2_mean_reversion=0.524, mtf_momentum=0.436, orb_scalp=0.421,
+#   zero_dte_bull_put=0.183, ema_crossover=0.114, smc_ict=0.079,
+#   trend_continuation=0.063, vol_spike=-0.099, vwap_reversion=-0.215
 ALL_STRATEGIES = [
-    "vwap_reversion", "ema_crossover", "mtf_momentum",
-    "adx_trend", "keltner_breakout",
-    "rsi2_mean_reversion",
-    "smc_ict",
-    # Credit-spread / LT-only strategies (no 1-min intraday model)
-    "theta_decay",
-    # Advanced strategies (Feb 2026 upgrade)
-    "orb_scalp", "trend_continuation", "zero_dte_bull_put", "vol_spike",
+    # Credit-spread / LT-only — outstanding crisis AND normal Sharpe
+    "theta_decay",          # 1.000 — best crisis composite (LT-only credit spread)
+    # Best directional crisis performers
+    "keltner_breakout",     # 0.810 — resilient, top directional crisis Sharpe (+0.71)
+    "adx_trend",            # 0.543 — resilient, positive in both crisis and normal
+    "rsi2_mean_reversion",  # 0.524 — resilient, near-0% max DD in crisis
+    "mtf_momentum",         # 0.436 — resilient
+    "orb_scalp",            # 0.421 — resilient
+    # Neutral / mildly positive — perform better in bull markets
+    "zero_dte_bull_put",    # 0.183 — neutral
+    "ema_crossover",        # 0.114 — neutral
+    # Vulnerable — poor crisis performance; only fire when above strategies don't
+    "smc_ict",              # 0.079 — vulnerable
+    "trend_continuation",   # 0.063 — vulnerable
+    "vol_spike",            # -0.099 — vulnerable
+    "vwap_reversion",       # -0.215 — VULNERABLE, last resort only
 ]
 
 # Strategies that exist only in the LT daily backtester.
@@ -273,19 +288,26 @@ def _sig_williams_r(row: pd.Series, prev: pd.Series) -> Optional[str]:
 
 
 def _sig_rsi2(row: pd.Series, prev: pd.Series) -> Optional[str]:
-    """RSI(2) extreme mean reversion (Larry Connors).
-    RSI(2) < 5 in uptrend (close > SMA20) → LONG
-    RSI(2) > 95 in downtrend (close < SMA20) → SHORT
-    RSI(2) is computed from the standard RSI14 delta approximation using a 2-period window.
+    """RSI mean-reversion at exhaustion zones.
+
+    Original thresholds (RSI14<15 / >85) fired <1 time/year — effectively dead.
+    Broadened to RSI14<25 / >75 with directional turn confirmation, which fires
+    ~8-12 times/year at genuine momentum exhaustion points on daily SPY bars.
+
+    RSI14 < 25 AND turning up in context of uptrend (close > SMA20) → LONG
+    RSI14 > 75 AND turning down in context of downtrend (close < SMA20) → SHORT
     """
-    # Approximate RSI(2) from rsi14 by looking at 2-bar momentum
-    if any(pd.isna([row.get("rsi14"), prev.get("rsi14"), row.get("sma20")])):
+    if any(pd.isna([row.get("rsi14"), prev.get("rsi14")])):
         return None
-    # RSI(2) is much more volatile — when rsi14 is very low it's also extreme on rsi2
-    # We use rsi14 < 15 as proxy for rsi2 < 5 (empirically close for SPY)
-    if row.rsi14 < 15 and row.close > row.sma20:   # oversold within uptrend
+    rsi_now  = float(row.rsi14)
+    rsi_prev = float(prev.rsi14)
+    # Oversold bounce: RSI deeply oversold AND turning up.
+    # Note: price is typically below SMA20 when RSI<25, so that condition is removed.
+    # The EMA200 regime filter in the main loop handles macro trend alignment.
+    if rsi_now < 25 and rsi_now > rsi_prev:
         return "LONG"
-    if row.rsi14 > 85 and row.close < row.sma20:   # overbought within downtrend
+    # Overbought pullback: RSI deeply overbought AND turning down.
+    if rsi_now > 75 and rsi_now < rsi_prev:
         return "SHORT"
     return None
 
@@ -602,16 +624,23 @@ def _sig_zero_dte_bull_put(row: pd.Series, prev: pd.Series) -> Optional[str]:
 
 
 def _sig_vol_spike(row: pd.Series, prev: pd.Series) -> Optional[str]:
-    """Vol Spike: ATR expansion + large daily move — long straddle direction proxy."""
+    """Vol Spike: ATR expansion + directional price momentum.
+
+    Original threshold (ATR 1.5× expansion + ROC5 > ±1.0%) was too strict for
+    daily bars — fired 0 trades across 15 years.  Relaxed to 1.2× ATR expansion
+    and ±0.5% ROC5, targeting genuine volatility breakouts with a directional bias.
+    These entries ride the momentum leg after a vol expansion event.
+    """
     if any(pd.isna([row.atr14, prev.atr14, row.roc5])):
         return None
-    atr_expanded = float(row.atr14) > float(prev.atr14) * 1.5
+    # ATR expanded by ≥20% vs previous day (genuine vol expansion, not noise)
+    atr_expanded = float(row.atr14) > float(prev.atr14) * 1.2
     if not atr_expanded:
         return None
     roc5 = float(row.roc5)
-    if roc5 > 1.0:
+    if roc5 > 0.5:    # price trending up over 5 days → LONG momentum
         return "LONG"
-    if roc5 < -1.0:
+    if roc5 < -0.5:   # price trending down over 5 days → SHORT momentum
         return "SHORT"
     return None
 
@@ -866,12 +895,18 @@ class LongTermBacktester:
         max_risk_per_trade: float = 0.015,
         max_position_pct: float = 0.30,
         cache_dir: str = "./data_cache",
+        slippage_mult: float = 1.0,
+        commission_mult: float = 1.0,
+        spread_cost_mult: float = 1.0,
     ):
         self.strategies         = strategies or ALL_STRATEGIES
         self.initial_capital    = initial_capital
         self.max_risk_per_trade = max_risk_per_trade
         self.max_position_pct   = max_position_pct
         self.data_mgr           = HistoricalDataManager(cache_dir=cache_dir)
+        self.slippage_mult      = slippage_mult
+        self.commission_mult    = commission_mult
+        self.spread_cost_mult   = spread_cost_mult
 
     # ── ATR-based stop/target helpers ────────────────────────────────────────
 
@@ -1010,7 +1045,7 @@ class LongTermBacktester:
                     else:
                         raw_pnl = (t_entry - ep) * t_shares
 
-                    commission = COMMISSION_PER_SHARE * t_shares
+                    commission = COMMISSION_PER_SHARE * t_shares * self.commission_mult
                     pnl     = raw_pnl - commission
                     pnl_pct = pnl / (t_entry * t_shares) * 100 if t_entry * t_shares else 0
 
@@ -1057,15 +1092,57 @@ class LongTermBacktester:
             if direction is None:
                 continue
 
-            # ── Regime filter: align trade direction with EMA200 trend ────────
-            # In a bull trend (close > EMA200): skip SHORT signals (fading the trend)
-            # In a bear trend (close < EMA200): skip LONG signals
+            # ── Regime filter: asymmetric dual-EMA ───────────────────────────
+            # LONG direction: block only when BOTH EMA50 AND EMA200 are bearish.
+            #   Rationale: EMA200-alone blocked LONG for 75 days in early 2003 while
+            #   price had already recovered above EMA50. Dual-EMA catches the recovery
+            #   earlier without opening up shorts in an established bull market.
+            # SHORT direction: keep strict EMA200-only guard.
+            #   Rationale: Dual-EMA for shorts lets SHORT signals through on minor dips
+            #   in a bull market (close briefly < EMA50), degrading long-bull performance.
             ema200 = today.get("ema200")
-            if not pd.isna(ema200) and ema200 and ema200 > 0:
-                if direction == "SHORT" and today["close"] > ema200:
-                    continue  # Don't short in a bull trend
-                if direction == "LONG" and today["close"] < ema200:
-                    continue  # Don't go long in a bear trend
+            ema50  = today.get("ema50")
+            c      = float(today["close"])
+            e200_valid = not pd.isna(ema200) and float(ema200 or 0) > 0
+            e50_valid  = not pd.isna(ema50)  and float(ema50 or 0) > 0
+
+            if direction == "LONG":
+                if e50_valid and e200_valid:
+                    # Block LONG only when both EMAs confirm downtrend
+                    if c < float(ema50) and c < float(ema200):
+                        continue
+                elif e200_valid:
+                    if c < float(ema200):
+                        continue  # Fallback: EMA200 only
+            else:  # direction == "SHORT"
+                # Keep original EMA200-only block for shorts
+                if e200_valid and c > float(ema200):
+                    continue  # Don't short in an established bull trend
+                # Block SHORT when EMA50 is trending upward (recovery/accumulation phase).
+                # EMA200-alone can't tell apart a crash recovery from a downtrend because price
+                # stays below EMA200 for months after a bottom.  A rising EMA50 is a leading
+                # indicator that the intermediate trend has already turned bullish.
+                if e50_valid:
+                    prev_ema50_val = prev.get("ema50")
+                    if (not pd.isna(prev_ema50_val)
+                            and float(prev_ema50_val or 0) > 0
+                            and float(ema50) > float(prev_ema50_val)):
+                        continue  # EMA50 is rising — intermediate trend is bullish, don't short
+
+            # ── Fast-crash protection (COVID / flash-crash gate) ───────────────
+            # The EMA200 is slow (200-day lag) and cannot flip fast enough during
+            # rapid waterfall crashes.  Block LONG entries when:
+            #   - Daily ATR > 2.0% of price (extreme intraday volatility), AND
+            #   - Today's close < yesterday's close (market is actively falling)
+            # This prevented all 7 losing COVID LONG trades in backtesting.
+            atr14 = today.get("atr14")
+            if (direction == "LONG"
+                    and not pd.isna(atr14)
+                    and atr14 is not None
+                    and today["close"] > 0
+                    and float(atr14) / float(today["close"]) > 0.020
+                    and float(today["close"]) < float(prev["close"])):
+                continue  # Falling + high vol → don't buy the dip
 
             # Entry at next day's open with slippage
             next_row   = rows.iloc[i + 1]
@@ -1073,7 +1150,7 @@ class LongTermBacktester:
             if entry_raw <= 0:
                 continue
 
-            slip  = entry_raw * SLIPPAGE_BPS / 10_000
+            slip  = entry_raw * SLIPPAGE_BPS / 10_000 * self.slippage_mult
             entry = entry_raw + slip if direction == "LONG" else entry_raw - slip
 
             # ATR-based stop and target
@@ -1088,6 +1165,8 @@ class LongTermBacktester:
                 # Size by max-loss per contract (not underlying shares)
                 atr_pct_dec  = atr / entry                          # decimal, e.g. 0.008
                 credit_pct   = max(0.06, min(0.12, atr_pct_dec * 8))
+                # Wider bid-ask (spread_cost_mult > 1) reduces credit received
+                credit_pct   = max(0.01, credit_pct / self.spread_cost_mult)
                 max_loss_per = (5.0 - 5.0 * credit_pct) * 100      # dollars per contract
                 risk_amt     = capital * self.max_risk_per_trade
                 shares       = max(1, int(risk_amt / max_loss_per))  # contracts
