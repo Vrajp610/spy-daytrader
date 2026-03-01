@@ -1,9 +1,10 @@
 """Zero-DTE Bull Put Spread strategy.
 
-Strategy spec (alpaca.markets):
-- Construct credit spreads by selling a put near 0.35 delta and buying a put
+Strategy spec (alpaca.markets / Tastytrade research):
+- Construct credit spreads by selling a put near 0.20 delta and buying a put
   2–4 strikes lower (spread width $2–$4).
 - Enter only when IV rank is moderate (40–60 %).
+- ADX must be below 25 — avoid selling premium into a strong trend.
 - Exit when credit decays by 50 % or if SPY threatens the short strike.
 - Allocate ≤ 1 % per trade; risk is limited to spread_width × 100 × contracts.
 
@@ -12,7 +13,8 @@ Implementation:
   is no major directional momentum in either direction (neutral to slightly bullish).
 - Options selector builds the put credit spread via options_preference="force_credit_spread".
 - preferred_dte=0 / min_dte=0 forces the selector to use same-day or next-day expiry.
-- Entry window: 9:45 AM – 12:00 PM only (full day for time decay to work).
+- Entry window: 10:00 AM – 12:00 PM only (avoid gamma explosion first 30 min).
+- EOD exit at 3:30 PM (not 3:50) — reduce same-day pin risk.
 """
 
 from __future__ import annotations
@@ -35,9 +37,10 @@ class ZeroDTEBullPutStrategy(BaseStrategy):
             "iv_rank_max": 60.0,          # maximum IV rank (avoid huge premium moves)
             "rsi_max": 65,                # avoid entering if clearly overbought
             "rsi_min": 40,                # require neutral-to-bullish bias
-            "min_entry_time": "09:45",
+            "adx_max": 25,               # block if trending strongly (short premium = dangerous)
+            "min_entry_time": "10:00",   # avoid first 30 min gamma explosion
             "max_entry_time": "12:00",   # must enter early enough for intraday theta
-            "eod_exit_time": "15:50",    # exit 10 min before close on expiry day
+            "eod_exit_time": "15:30",    # exit 30 min before close — reduce pin risk
             "spread_width": 2.0,         # $2 spread width (tight, defined risk)
         }
 
@@ -70,6 +73,7 @@ class ZeroDTEBullPutStrategy(BaseStrategy):
         rsi = row.get("rsi")
         atr = row.get("atr")
         ema50 = row.get("ema50")
+        adx = row.get("adx")
 
         if any(pd.isna(v) or v is None for v in [close, rsi]):
             return None
@@ -78,6 +82,10 @@ class ZeroDTEBullPutStrategy(BaseStrategy):
 
         # RSI must be neutral (not overbought / oversold extremes)
         if not (p["rsi_min"] <= rsi <= p["rsi_max"]):
+            return None
+
+        # Block on trending days — selling premium into strong trend is dangerous
+        if adx is not None and not pd.isna(adx) and float(adx) >= p["adx_max"]:
             return None
 
         # SPY must be above VWAP or EMA as directional support
@@ -121,8 +129,8 @@ class ZeroDTEBullPutStrategy(BaseStrategy):
                 "options_preference": "force_credit_spread",
                 "preferred_dte": 0,
                 "min_dte": 0,
-                "target_delta": 0.35,   # sell 0.35 delta put (spec)
-                "fallback_delta": 0.30,
+                "target_delta": 0.20,   # 0.20 delta: ~80% win rate vs 65% at 0.35 (Tastytrade)
+                "fallback_delta": 0.15,
                 "spread_width_override": p["spread_width"],
             },
         )

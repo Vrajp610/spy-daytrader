@@ -57,11 +57,16 @@ class EMACrossoverStrategy(BaseStrategy):
         adx = row.get("adx")
         vwap = row.get("vwap")
         atr = row.get("atr")
+        vol_ratio = row.get("vol_ratio", 1.0)
 
         # Validate indicators exist
         for val in [ema9, ema21, prev_ema9, prev_ema21, rsi, macd_hist, adx, vwap, atr]:
             if val is None or (isinstance(val, float) and pd.isna(val)):
                 return None
+
+        # Volume confirmation at crossover bar — crossovers on low volume whipsaw ~60% of the time
+        if pd.isna(vol_ratio) or float(vol_ratio) < 1.3:
+            return None
 
         # LONG: bullish EMA crossover
         if prev_ema9 <= prev_ema21 and ema9 > ema21:

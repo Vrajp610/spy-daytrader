@@ -259,13 +259,13 @@ def _sig_golden_cross(row: pd.Series, prev: pd.Series) -> Optional[str]:
 
 
 def _sig_keltner_breakout(row: pd.Series, prev: pd.Series) -> Optional[str]:
-    """Close breaks Keltner Channel (EMA21 ± 1.5×ATR) with above-average volume."""
+    """Close breaks Keltner Channel (EMA21 ± 2.0×ATR) with above-average volume."""
     if any(pd.isna([row.get("ema21"), row.get("atr14"), row.get("vol_ratio")])):
         return None
     if row.vol_ratio < 1.2:
         return None
-    kc_upper = row.ema21 + 1.5 * row.atr14
-    kc_lower = row.ema21 - 1.5 * row.atr14
+    kc_upper = row.ema21 + 2.0 * row.atr14
+    kc_lower = row.ema21 - 2.0 * row.atr14
     if row.close > kc_upper:
         return "LONG"
     if row.close < kc_lower:

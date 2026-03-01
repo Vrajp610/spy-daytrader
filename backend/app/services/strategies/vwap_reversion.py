@@ -42,9 +42,9 @@ class VWAPReversionStrategy(BaseStrategy):
 
         # Time filters
         t = current_time.time() if isinstance(current_time, datetime) else current_time
-        market_open = time(9, 30)
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
-        if t < time(10, 0) or t >= eod:
+        # Block 9:30-10:00 (no volume anchor) and 2:30-close (MOC imbalance distortion)
+        if t < time(10, 0) or t >= time(14, 30) or t >= eod:
             return None
 
         close = row["close"]
@@ -52,10 +52,16 @@ class VWAPReversionStrategy(BaseStrategy):
         rsi = row.get("rsi")
         atr = row.get("atr")
         vol_ratio = row.get("vol_ratio", 1.0)
+        adx = row.get("adx")
 
         if vwap is None or rsi is None or atr is None:
             return None
         if pd.isna(vwap) or pd.isna(rsi) or pd.isna(atr):
+            return None
+
+        # Block mean-reversion on strong trending days (ADX > 25 = trend, not range)
+        # Mean reversion has a poor edge when price is trending away from VWAP with conviction.
+        if adx is not None and not pd.isna(adx) and float(adx) > 25.0:
             return None
 
         # LONG: price well below VWAP + oversold RSI + volume surge

@@ -199,9 +199,9 @@ class DataManager:
         roll_low  = df["low"].rolling(14).min()
         df["wr14"] = -100 * (roll_high - df["close"]) / (roll_high - roll_low).replace(0, np.nan)
 
-        # Keltner Channel (EMA21 ± 1.5×ATR) — used by keltner_breakout strategy
-        df["kc_upper"] = df["ema21"] + 1.5 * df["atr"]
-        df["kc_lower"] = df["ema21"] - 1.5 * df["atr"]
+        # Keltner Channel (EMA21 ± 2.0×ATR) — 2.0× reduces false breakouts on SPY
+        df["kc_upper"] = df["ema21"] + 2.0 * df["atr"]
+        df["kc_lower"] = df["ema21"] - 2.0 * df["atr"]
 
         # MACD
         ema12 = df["close"].ewm(span=12, adjust=False).mean()

@@ -56,6 +56,11 @@ class ORBScalpStrategy(BaseStrategy):
         if date_str in self._opening_ranges:
             return self._opening_ranges[date_str]
 
+        # Prune stale entries — prevents unbounded memory growth in long backtests
+        if len(self._opening_ranges) >= 3:
+            oldest_key = min(self._opening_ranges.keys())
+            del self._opening_ranges[oldest_key]
+
         or_end = time(9, 45)
         t = current_time.time() if isinstance(current_time, datetime) else current_time
         if t < or_end:
@@ -128,6 +133,11 @@ class ORBScalpStrategy(BaseStrategy):
         atr = row.get("atr")
         atr_val = float(atr) if atr is not None and not pd.isna(atr) else range_width
 
+        # VIX-adaptive target: wider expected moves justify larger breakout targets
+        ctx = kwargs.get("market_context")
+        vix_val = getattr(ctx, "vix", 20.0) if ctx is not None else 20.0
+        target_mult = 2.0 if float(vix_val) > 20.0 else p["target_range_mult"]
+
         # Quality score: volume surge + range quality
         vol_score = min(1.0, (float(vol_ratio) - 1.5) / 1.5)  # 0 at 1.5×, 1 at 3.0×
         range_quality = (range_width / atr_val) if atr_val > 0 else 0.5
@@ -145,10 +155,16 @@ class ORBScalpStrategy(BaseStrategy):
             "fallback_delta": 0.40,
         }
 
+        # VWAP alignment: breakout must be on the correct side of VWAP for directional support
+        vwap = row.get("vwap")
+
         # Breakout above opening range
         if close > or_high:
+            # Require close above VWAP — bullish breakout needs VWAP support
+            if vwap is not None and not pd.isna(vwap) and float(close) < float(vwap):
+                return None
             stop = or_high - range_width * p["retracement_stop_pct"]
-            target = close + range_width * p["target_range_mult"]
+            target = close + range_width * target_mult
             meta["options_preference"] = "long_call"
             return TradeSignal(
                 strategy=self.name,
@@ -163,8 +179,11 @@ class ORBScalpStrategy(BaseStrategy):
 
         # Breakdown below opening range
         if close < or_low:
+            # Require close below VWAP — bearish breakdown needs VWAP resistance above
+            if vwap is not None and not pd.isna(vwap) and float(close) > float(vwap):
+                return None
             stop = or_low + range_width * p["retracement_stop_pct"]
-            target = close - range_width * p["target_range_mult"]
+            target = close - range_width * target_mult
             meta["options_preference"] = "long_put"
             return TradeSignal(
                 strategy=self.name,
