@@ -43,18 +43,23 @@ STRATEGY_MAP = {
 REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
         "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
-        "smc_ict", "orb_scalp", "trend_continuation",
+        "orb_scalp", "trend_continuation",
+        # smc_ict removed: WR 38.5%, PF 1.00 — consistently flat/negative in trending windows
     ],
     MarketRegime.TRENDING_DOWN: [
         "ema_crossover", "mtf_momentum", "adx_trend", "rsi2_mean_reversion",
-        "smc_ict", "orb_scalp", "trend_continuation",
+        "orb_scalp",
+        # smc_ict removed: GFC CAGR -1.02%, 2022 bear CAGR -1.76%
+        # trend_continuation removed: GFC -2.19% CAGR WR 16.7%; 2022 bear -2.39% CAGR WR 25%
     ],
     MarketRegime.RANGE_BOUND: [
-        "vwap_reversion", "rsi2_mean_reversion", "smc_ict", "zero_dte_bull_put",
+        "vwap_reversion", "rsi2_mean_reversion", "zero_dte_bull_put",
+        # smc_ict removed: flat edge, adds noise without alpha
     ],
     MarketRegime.VOLATILE: [
         "vwap_reversion", "keltner_breakout",
-        # smc_ict intentionally excluded: VOLATILE skipped inside strategy
+        # orb_scalp: ORB captures large intraday moves during volatile sessions
+        "orb_scalp",
         # vol_spike buys straddles to profit from IV expansion in volatile regimes
         "vol_spike",
     ],

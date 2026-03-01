@@ -48,29 +48,35 @@ ET = ZoneInfo("America/New_York")
 REGIME_STRATEGY_MAP = {
     MarketRegime.TRENDING_UP: [
         "ema_crossover", "mtf_momentum", "adx_trend", "keltner_breakout",
-        "rsi2_mean_reversion", "smc_ict", "theta_decay", "orb_scalp",
+        "rsi2_mean_reversion", "theta_decay", "orb_scalp",
         "trend_continuation", "zero_dte_bull_put",
+        # smc_ict removed: WR 38.5%, PF 1.00 — consistently flat/negative in all trend windows
     ],
     MarketRegime.TRENDING_DOWN: [
         "ema_crossover", "mtf_momentum", "adx_trend", "keltner_breakout",
-        "rsi2_mean_reversion", "smc_ict", "theta_decay", "orb_scalp",
-        "trend_continuation",
+        "rsi2_mean_reversion", "theta_decay", "orb_scalp",
+        # smc_ict removed: GFC CAGR -1.02%, 2022 bear CAGR -1.76%
+        # trend_continuation removed: GFC -2.19% CAGR WR 16.7%; 2022 bear -2.39% CAGR WR 25%
     ],
     MarketRegime.RANGE_BOUND: [
         # Credit / premium strategies — ideal in low-vol range-bound days
         "theta_decay", "zero_dte_bull_put",
-        # Breakout / momentum — captures moves when range breaks
-        "keltner_breakout", "orb_scalp", "adx_trend",
+        # Breakout / momentum — orb captures the range break; adx gate ensures trend before keltner fires
+        "orb_scalp", "adx_trend",
         # Mean-reversion — trades reversals at range extremes
-        "vwap_reversion", "rsi2_mean_reversion", "smc_ict",
+        "vwap_reversion", "rsi2_mean_reversion",
         # Broad fallback
         "ema_crossover",
+        # keltner removed: ADX>20 gate makes it a no-op in ranging market (ADX<20 = range)
+        # smc_ict removed: WR 38.5%, PF 1.00 — adds noise without edge
     ],
     MarketRegime.VOLATILE: [
         "keltner_breakout", "adx_trend",
+        # orb_scalp: ORB captures large intraday moves during volatile sessions
+        "orb_scalp",
         # vol_spike buys straddles to profit from IV expansion
         "vol_spike",
-        # vwap_reversion works in volatile intraday swings
+        # vwap_reversion works in volatile intraday swings (blocked in extreme ADX>25 sessions)
         "vwap_reversion",
     ],
 }

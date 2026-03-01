@@ -88,10 +88,27 @@ class LongTermResult:
 # ── Daily signal generators ───────────────────────────────────────────────────
 
 def _sig_vwap_reversion(row: pd.Series, prev: pd.Series) -> Optional[str]:
-    """Price deviation from SMA20: >2% above → SHORT, <2% below → LONG."""
+    """Price deviation from SMA20 with caps to avoid catching falling knives / crash recoveries.
+
+    Fires LONG when 2%–5% below SMA20; SHORT when 2%–5% above.
+    Beyond ±5% is a trend/crash event — mean reversion has poor edge there.
+    Also blocks SHORT when ATR > 2% and price is rapidly rising (post-crash bounce).
+    """
     if pd.isna(row.sma20) or row.sma20 == 0:
         return None
     dev = (row.close - row.sma20) / row.sma20 * 100
+
+    # Cap: deviations beyond ±5% indicate a trend/crash, not a reversion setup
+    if abs(dev) > 5.0:
+        return None
+
+    atr14 = row.get("atr14")
+    if atr14 is not None and not pd.isna(atr14) and float(row.close) > 0:
+        atr_pct = float(atr14) / float(row.close)
+        # Fast-recovery guard: don't short into a parabolic bounce (symmetric to LONG fast-crash gate)
+        if dev > 2.0 and atr_pct > 0.020 and float(row.close) > float(prev.close):
+            return None
+
     if dev < -2.0:
         return "LONG"
     if dev > 2.0:
