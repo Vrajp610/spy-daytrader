@@ -378,6 +378,7 @@ class TradingEngine:
 
             self._current_chain = await self.chain_provider.get_chain(
                 "SPY", underlying_price=price, atr=atr, bar_minutes=1,
+                vix=self._current_vix,
             )
             self._last_chain_fetch = datetime.now(ET)
 
@@ -406,37 +407,63 @@ class TradingEngine:
             import yfinance as yf
             loop = asyncio.get_running_loop()
 
-            def _download():
-                vix_data = yf.download(
-                    "^VIX ^VIX3M", period="2d", interval="5m",
-                    progress=False, auto_adjust=True,
-                )
-                return vix_data
+            def _fetch_vix_prices():
+                """Try yf.download first; fall back to fast_info on failure."""
+                vix_val, vix3m_val = 0.0, 0.0
+                try:
+                    data = yf.download(
+                        "^VIX ^VIX3M", period="2d", interval="5m",
+                        progress=False, auto_adjust=True,
+                    )
+                    if data is not None and not data.empty:
+                        close_cols = [c for c in data.columns if c[0].lower() == "close"]
+                        vix_col = next((c for c in close_cols if "VIX" in c[1] and "3M" not in c[1]), None)
+                        vix3m_col = next((c for c in close_cols if "VIX3M" in c[1]), None)
+                        if vix_col and not data[vix_col].dropna().empty:
+                            vix_val = float(data[vix_col].dropna().iloc[-1])
+                        if vix3m_col and not data[vix3m_col].dropna().empty:
+                            vix3m_val = float(data[vix3m_col].dropna().iloc[-1])
+                        if vix_val > 0:
+                            return vix_val, vix3m_val
+                except Exception:
+                    pass
+                # Fallback: direct Yahoo Finance chart API (bypasses yfinance download)
+                import urllib.request, json as _json, ssl, certifi
+                _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+                for symbol, attr in [("^VIX", "vix_val"), ("^VIX3M", "vix3m_val")]:
+                    try:
+                        encoded = symbol.replace("^", "%5E")
+                        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}?range=1d&interval=5m"
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, context=_ssl_ctx, timeout=10) as r:
+                            data = _json.loads(r.read())
+                        price = data.get("chart", {}).get("result", [{}])[0].get("meta", {}).get("regularMarketPrice", 0)
+                        if attr == "vix_val":
+                            vix_val = float(price or 0)
+                        else:
+                            vix3m_val = float(price or 0)
+                    except Exception:
+                        pass
+                return vix_val, vix3m_val
 
-            data = await loop.run_in_executor(None, _download)
+            vix_val, vix3m_val = await loop.run_in_executor(None, _fetch_vix_prices)
 
-            if data is not None and not data.empty:
-                # Handle MultiIndex columns (ticker, field)
-                close_cols = [c for c in data.columns if c[0].lower() == "close"]
-                vix_col = next((c for c in close_cols if "VIX" in c[1] and "3M" not in c[1]), None)
-                vix3m_col = next((c for c in close_cols if "VIX3M" in c[1]), None)
+            if vix_val > 0:
+                self._current_vix = vix_val
+            if vix3m_val > 0:
+                self._current_vix3m = vix3m_val
 
-                if vix_col and not data[vix_col].dropna().empty:
-                    self._current_vix = float(data[vix_col].dropna().iloc[-1])
-                if vix3m_col and not data[vix3m_col].dropna().empty:
-                    self._current_vix3m = float(data[vix3m_col].dropna().iloc[-1])
+            if self._current_vix3m > 0:
+                self._vix_term_ratio = self._current_vix / self._current_vix3m
 
-                if self._current_vix3m > 0:
-                    self._vix_term_ratio = self._current_vix / self._current_vix3m
+            self.risk_manager.set_vix(self._current_vix, self._current_vix3m)
+            self._vix_last_fetch = now
 
-                self.risk_manager.set_vix(self._current_vix, self._current_vix3m)
-                self._vix_last_fetch = now
-
-                term_label = "BACKWARDATION" if self._vix_term_ratio > 1.0 else "contango"
-                logger.info(
-                    f"VIX: {self._current_vix:.1f} | VIX3M: {self._current_vix3m:.1f} | "
-                    f"ratio: {self._vix_term_ratio:.3f} ({term_label})"
-                )
+            term_label = "BACKWARDATION" if self._vix_term_ratio > 1.0 else "contango"
+            logger.info(
+                f"VIX: {self._current_vix:.1f} | VIX3M: {self._current_vix3m:.1f} | "
+                f"ratio: {self._vix_term_ratio:.3f} ({term_label})"
+            )
         except Exception as e:
             logger.debug(f"VIX fetch error (non-critical): {e}")
 

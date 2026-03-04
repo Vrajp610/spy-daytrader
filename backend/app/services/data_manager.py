@@ -218,8 +218,12 @@ class DataManager:
         df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / sma20
 
         # Volume average (20-bar)
+        # Use replace(0, NaN) on volume so that incomplete in-progress bars (volume=0 from Yahoo)
+        # don't produce vol_ratio=0 and block signal generation. Forward-fill inherits previous
+        # complete bar's ratio, which is a far better proxy than 0.
         df["vol_avg"] = df["volume"].rolling(20).mean()
-        df["vol_ratio"] = df["volume"] / df["vol_avg"].replace(0, np.nan)
+        df["vol_ratio"] = df["volume"].replace(0, np.nan) / df["vol_avg"].replace(0, np.nan)
+        df["vol_ratio"] = df["vol_ratio"].ffill()
 
         return df
 

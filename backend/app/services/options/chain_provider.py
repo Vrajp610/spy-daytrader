@@ -236,7 +236,7 @@ class SyntheticChainProvider:
     def generate(
         self, underlying_price: float, atr: float = 2.0,
         dte_min: int = 5, dte_max: int = 14,
-        bar_minutes: int = 1,
+        bar_minutes: int = 1, vix: float = 0.0,
     ) -> OptionChainSnapshot:
         iv = pricing.iv_from_atr(atr, underlying_price, bar_minutes=bar_minutes)
         r = 0.05  # risk-free rate
@@ -330,11 +330,15 @@ class SyntheticChainProvider:
 
         # Adaptive IV rank: compare current annualized IV to SPY historical range
         # SPY historical IV: ~10% (calm) to ~40% (very stressed); typical 15-25%
-        # NOTE: iv_from_atr using 1-min bars over-estimates annualized IV (no autocorrelation
-        # correction). Cap the effective IV used for ranking at 35% to avoid a perpetually
-        # maximum rank that forces IRON_CONDOR when user strategies request PUT_CREDIT_SPREAD.
+        # Prefer VIX-based rank when VIX is available — much more accurate than ATR-based.
+        # VIX IS the 30-day implied vol of the S&P 500 (already annualized, in %).
+        # ATR-based fallback: cap at 0.30 since 1-min ATR over-scales via sqrt(390).
         iv_low, iv_high = 0.10, 0.40
-        iv_for_rank = min(iv, 0.30)  # realistic cap: 1-min ATR inflates IV 3-4×
+        if vix > 0:
+            # VIX/100 gives annualized IV; map directly to percentile rank
+            iv_for_rank = vix / 100.0
+        else:
+            iv_for_rank = min(iv, 0.30)  # realistic cap: 1-min ATR inflates IV 3-4×
         iv_rank = round(max(0.0, min(100.0, (iv_for_rank - iv_low) / (iv_high - iv_low) * 100)), 1)
 
         return OptionChainSnapshot(
@@ -365,7 +369,7 @@ class OptionChainProvider:
     async def get_chain(
         self, symbol: str = "SPY",
         underlying_price: float = 0.0, atr: float = 2.0,
-        bar_minutes: int = 1,
+        bar_minutes: int = 1, vix: float = 0.0,
     ) -> OptionChainSnapshot:
         """Get option chain, trying Schwab -> Yahoo -> Synthetic."""
         now = time.time()
@@ -394,7 +398,7 @@ class OptionChainProvider:
         # Synthetic fallback
         if underlying_price <= 0:
             underlying_price = 590.0  # reasonable SPY default
-        chain = self._synthetic.generate(underlying_price, atr, dte_min, dte_max, bar_minutes=bar_minutes)
+        chain = self._synthetic.generate(underlying_price, atr, dte_min, dte_max, bar_minutes=bar_minutes, vix=vix)
         logger.info(f"Generated synthetic chain: {len(chain.calls)} calls, {len(chain.puts)} puts, IV={chain.calls[list(chain.calls.keys())[0]].iv:.1%}" if chain.calls else "Generated empty synthetic chain")
         self._cache = chain
         self._cache_time = now
