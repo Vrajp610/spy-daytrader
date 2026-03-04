@@ -28,11 +28,12 @@ class ADXTrendStrategy(BaseStrategy):
 
     def default_params(self) -> dict:
         return {
-            "adx_min":          20,    # SPY-calibrated: 25 filtered too many valid trends
-            "adx_exit":         18,    # exit if ADX weakens below this
+            "adx_min":          15,    # lowered: 20 missed early trend development; SPY trends often start at 15-20
+            "adx_exit":         13,    # adjusted to match lower entry threshold
+            "di_gap_min":        7,    # DI gap: was hardcoded 10; 7 catches earlier directional moves
             "rsi_long_min":     40,
-            "rsi_long_max":     65,
-            "rsi_short_min":    35,
+            "rsi_long_max":     72,    # raised: overbought trend continuation is valid at ADX>20
+            "rsi_short_min":    28,    # lowered: oversold downtrends also valid
             "rsi_short_max":    60,
             "atr_target_mult":  2.0,
             "atr_stop_mult":    1.5,
@@ -76,9 +77,9 @@ class ADXTrendStrategy(BaseStrategy):
         if prev_adx is None or pd.isna(prev_adx) or float(adx) <= float(prev_adx):
             return None
 
-        # DI gap > 10 confirms directional conviction (Wilder 1978)
+        # DI gap confirms directional conviction (Wilder 1978)
         di_gap = abs(float(plus_di) - float(minus_di))
-        if di_gap < 10.0:
+        if di_gap < p["di_gap_min"]:
             return None
 
         # LONG: +DI leading, bullish EMA alignment, above VWAP

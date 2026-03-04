@@ -19,10 +19,10 @@ class VWAPReversionStrategy(BaseStrategy):
 
     def default_params(self) -> dict:
         return {
-            "vwap_deviation_pct": 0.003,
-            "rsi_threshold": 30,
-            "rsi_short_threshold": 70,
-            "volume_surge_ratio": 1.3,
+            "vwap_deviation_pct": 0.002,  # 0.2% deviation (SPY low-ATR days rarely reach 0.3%)
+            "rsi_threshold": 40,          # LONG when RSI ≤ 40 (was 30 — too extreme for daily signals)
+            "rsi_short_threshold": 60,    # SHORT when RSI ≥ 60 (was 70 — nearly never reached)
+            "volume_surge_ratio": 1.2,    # slightly lower: vol confirmation without over-filtering
             "min_minutes_after_open": 30,
             "atr_target_mult": 1.5,
             "atr_stop_mult": 1.0,
@@ -59,9 +59,9 @@ class VWAPReversionStrategy(BaseStrategy):
         if pd.isna(vwap) or pd.isna(rsi) or pd.isna(atr):
             return None
 
-        # Block mean-reversion on strong trending days (ADX > 25 = trend, not range)
-        # Mean reversion has a poor edge when price is trending away from VWAP with conviction.
-        if adx is not None and not pd.isna(adx) and float(adx) > 25.0:
+        # Block mean-reversion on very strong trending days — reversion fails with high conviction trends.
+        # Raised from 25 to 32: SPY ADX of 25-32 often has intraday VWAP oscillations worth trading.
+        if adx is not None and not pd.isna(adx) and float(adx) > 32.0:
             return None
 
         # LONG: price well below VWAP + oversold RSI + volume surge

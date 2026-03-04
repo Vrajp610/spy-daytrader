@@ -63,6 +63,8 @@ REGIME_STRATEGY_MAP = {
         "theta_decay", "zero_dte_bull_put",
         # Breakout / momentum — orb captures the range break; adx gate ensures trend before keltner fires
         "orb_scalp", "adx_trend",
+        # Pullback scalp — 5-min 20-EMA pullbacks work in intraday mini-trends within a range
+        "trend_continuation",
         # Mean-reversion — trades reversals at range extremes
         "vwap_reversion", "rsi2_mean_reversion",
         # Broad fallback

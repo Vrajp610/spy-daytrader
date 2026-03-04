@@ -33,13 +33,13 @@ class ZeroDTEBullPutStrategy(BaseStrategy):
 
     def default_params(self) -> dict:
         return {
-            "iv_rank_min": 40.0,          # minimum IV rank (premium must be worth selling)
-            "iv_rank_max": 60.0,          # maximum IV rank (avoid huge premium moves)
-            "rsi_max": 65,                # avoid entering if clearly overbought
-            "rsi_min": 40,                # require neutral-to-bullish bias
-            "adx_max": 25,               # block if trending strongly (short premium = dangerous)
+            "iv_rank_min": 25.0,         # minimum IV rank; VIX=20 → rank≈33%, VIX=17.5 → rank≈25%
+            "iv_rank_max": 70.0,         # cap raised: still avoid panic-spike IV but wider window
+            "rsi_max": 65,               # avoid entering if clearly overbought
+            "rsi_min": 35,               # require neutral-to-slightly-bullish bias
+            "adx_max": 28,               # raised: 25 was too tight for intraday SPY swings
             "min_entry_time": "10:00",   # avoid first 30 min gamma explosion
-            "max_entry_time": "12:00",   # must enter early enough for intraday theta
+            "max_entry_time": "15:00",   # extend to afternoon; 15:30 EOD exit gives 30 min buffer
             "eod_exit_time": "15:30",    # exit 30 min before close — reduce pin risk
             "spread_width": 2.0,         # $2 spread width (tight, defined risk)
         }
