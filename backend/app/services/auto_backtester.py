@@ -323,11 +323,12 @@ class AutoBacktester:
         tests: list[dict] = []
         for strat in ALL_STRATEGIES:
             for dr in date_ranges:
-                tests.append({"strategies": [strat], "label": f"{strat} ({dr['label']})", **dr})
+                tests.append({"strategies": [strat], **dr, "label": f"{strat} ({dr['label']})"})
         for combo in COMBO_CONFIGS:
             for dr in date_ranges:
                 combo_name = "+".join(combo[:3]) + ("..." if len(combo) > 3 else "")
-                tests.append({"strategies": combo, "label": f"{combo_name} ({dr['label']})", **dr})
+                tests.append({"strategies": combo, **dr, "label": f"{combo_name} ({dr['label']})"})
+
 
         self._progress = {
             "status": "running",

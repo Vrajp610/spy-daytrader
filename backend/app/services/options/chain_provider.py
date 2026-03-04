@@ -244,28 +244,29 @@ class SyntheticChainProvider:
         today = now.date()
 
         # Generate weekly expirations (Fridays) within DTE range
-        # Ensure minimum 1 DTE to never pick today or past dates
-        min_offset = max(1, dte_min)
+        # SPY has daily expirations Mon–Fri; generate all weekday expirations within range.
+        # Ensure minimum dte_min DTE (0 allowed for 0-DTE strategies if dte_min=0).
+        min_offset = max(0, dte_min)
         expirations = []
         for day_offset in range(min_offset, dte_max + 1):
             exp_date = today + timedelta(days=day_offset)
-            if exp_date.weekday() == 4:  # Friday
+            if exp_date.weekday() < 5:  # Mon–Fri (0–4), skip Sat(5)/Sun(6)
                 expirations.append(exp_date.strftime("%Y-%m-%d"))
 
-        # If no Friday falls in range, use the closest one after min_offset
+        # Fallback: if range contains no weekdays, use the next weekday
         if not expirations:
             for day_offset in range(min_offset, dte_max + 7):
                 exp_date = today + timedelta(days=day_offset)
-                if exp_date.weekday() == 4:
+                if exp_date.weekday() < 5:
                     expirations.append(exp_date.strftime("%Y-%m-%d"))
                     break
 
         calls = {}
         puts = {}
 
-        # Generate strikes at $1 intervals, ±$15 from ATM
+        # Generate strikes at $1 intervals, ±$25 from ATM (wider to accommodate OTM credit spreads)
         atm = round(underlying_price)
-        strikes = [atm + i for i in range(-15, 16)]
+        strikes = [atm + i for i in range(-25, 26)]
 
         for exp_str in expirations:
             exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
@@ -329,8 +330,12 @@ class SyntheticChainProvider:
 
         # Adaptive IV rank: compare current annualized IV to SPY historical range
         # SPY historical IV: ~10% (calm) to ~40% (very stressed); typical 15-25%
+        # NOTE: iv_from_atr using 1-min bars over-estimates annualized IV (no autocorrelation
+        # correction). Cap the effective IV used for ranking at 35% to avoid a perpetually
+        # maximum rank that forces IRON_CONDOR when user strategies request PUT_CREDIT_SPREAD.
         iv_low, iv_high = 0.10, 0.40
-        iv_rank = round(max(0.0, min(100.0, (iv - iv_low) / (iv_high - iv_low) * 100)), 1)
+        iv_for_rank = min(iv, 0.30)  # realistic cap: 1-min ATR inflates IV 3-4×
+        iv_rank = round(max(0.0, min(100.0, (iv_for_rank - iv_low) / (iv_high - iv_low) * 100)), 1)
 
         return OptionChainSnapshot(
             underlying_price=underlying_price,

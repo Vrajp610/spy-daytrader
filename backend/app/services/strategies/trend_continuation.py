@@ -65,7 +65,8 @@ class TrendContinuationStrategy(BaseStrategy):
         p = self.params
         t = current_time.time() if isinstance(current_time, datetime) else current_time
 
-        min_open = time(9, 30 + p["min_minutes_after_open"])
+        _open_total = 9 * 60 + 30 + p["min_minutes_after_open"]
+        min_open = time(_open_total // 60, _open_total % 60)
         max_entry = time(*[int(x) for x in p["max_entry_time"].split(":")])
         eod = time(*[int(x) for x in p["eod_exit_time"].split(":")])
 

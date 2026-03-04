@@ -105,6 +105,8 @@ class OptionsSelector:
             "strangle": OptionsStrategyType.LONG_STRANGLE,
             "long_call": OptionsStrategyType.LONG_CALL,
             "long_put": OptionsStrategyType.LONG_PUT,
+            # Strategy-specific explicit preferences (map directly, bypass IV-rank fallback)
+            "zero_dte_bull_put": OptionsStrategyType.PUT_CREDIT_SPREAD,
         }
 
         # IV rank adjustments - override preference when IV conditions are extreme
