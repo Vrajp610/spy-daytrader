@@ -143,6 +143,7 @@ class TradingEngine:
         self._vix_term_ratio: float = 0.91       # VIX/VIX3M; <1=contango, >1=backwardation
         self._vix_last_fetch: Optional[datetime] = None
         self._calendar_last_fetch: Optional[datetime] = None  # macro event calendar + news refresh
+        self._event_day_log_last: Optional[datetime] = None  # rate-limit event-day log messages
 
         # QQQ correlated data for SMT divergence checks in smc_ict
         self._df_qqq_5min:  Optional[pd.DataFrame] = None
@@ -572,13 +573,46 @@ class TradingEngine:
         today = now.date()
 
         # ── Macro event calendar gate ─────────────────────────────────────────
-        # Block ALL entries on high-impact event days (FOMC, CPI, NFP, etc.).
-        # Volatility and direction are unpredictable in the hours around releases.
+        # FOMC/Jackson Hole → block all day (2 PM release + day-long uncertainty).
+        # Other releases (CPI, NFP, Retail Sales, Unemployment) → block only the
+        # first 60 min after open (9:30–10:30 AM ET) while the market absorbs the
+        # 8:30 AM data; trading resumes normally after 10:30 AM.
         if macro_calendar.is_event_day(today):
             events = macro_calendar.get_events_for_date(today)
             names = ", ".join(e["title"] for e in events)
-            logger.info(f"EVENT DAY ({names}) — all new entries blocked")
-            return
+            _FOMC_KW = {"fomc", "federal funds rate", "interest rate decision",
+                        "fed rate", "jackson hole"}
+            is_fomc = any(
+                any(kw in e["title"].lower() for kw in _FOMC_KW)
+                for e in events
+            )
+            now_log_stale = (
+                self._event_day_log_last is None
+                or (now - self._event_day_log_last).total_seconds() >= 60
+            )
+            if is_fomc:
+                if now_log_stale:
+                    logger.info(f"FOMC DAY ({names}) — all new entries blocked for full session")
+                    self._event_day_log_last = now
+                return
+            else:
+                # Non-FOMC: only block 9:30–10:30 AM volatility window
+                market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+                vol_window_end = now.replace(hour=10, minute=30, second=0, microsecond=0)
+                if market_open <= now < vol_window_end:
+                    if now_log_stale:
+                        logger.info(
+                            f"EVENT DAY ({names}) — blocking 9:30–10:30 AM volatility window"
+                        )
+                        self._event_day_log_last = now
+                    return
+                # After 10:30 AM → trading permitted; log once per 10 min
+                if (self._event_day_log_last is None
+                        or (now - self._event_day_log_last).total_seconds() >= 600):
+                    logger.info(
+                        f"EVENT DAY ({names}) — past volatility window, trading permitted"
+                    )
+                    self._event_day_log_last = now
 
         # ── News risk gate ────────────────────────────────────────────────────
         # Block all entries when news scanner detects HIGH macro shock language.
