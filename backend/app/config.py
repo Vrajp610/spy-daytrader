@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     max_trades_per_day: int = 100
     cooldown_after_consecutive_losses: int = 2
     cooldown_minutes: int = 30
-    min_signal_confidence: float = 0.60
+    min_signal_confidence: float = 0.50
 
     # Options settings
     default_spread_width: float = 5.0          # wider spread = better R:R for debit spreads

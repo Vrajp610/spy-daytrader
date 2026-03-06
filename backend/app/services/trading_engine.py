@@ -591,23 +591,29 @@ class TradingEngine:
             )
             return
 
-        # When VIX is elevated (25-35), restrict to mean-reversion strategies only.
-        # High VIX → negative GEX environment → dealers amplify moves → momentum fails.
-        vix_stressed = self._current_vix >= 25.0
+        # VIX stress gate — only activate in genuine crisis (VIX > 32 = above typical fear threshold).
+        # VIX 25-32 is "mildly elevated" but not crisis: credit spreads still profitable,
+        # orb_scalp captures morning range breaks, adx_trend works on directional days.
+        # Old threshold of 25 was too low and blocked all strategies on normal volatile days.
+        vix_stressed = self._current_vix >= 32.0
         vix_backwardation = self._vix_term_ratio >= 1.0  # VIX > VIX3M = near-term fear spike
 
         # Filter strategies by regime AND auto-disable status
         allowed_by_regime = REGIME_STRATEGY_MAP.get(self.current_regime, [])
 
-        # In stressed VIX environments, only allow mean-reversion strategies
+        # In genuine crisis (VIX > 32), restrict to mean-reversion + premium-selling strategies.
+        # zero_dte_bull_put and theta_decay benefit from elevated IV and are kept active.
         MEAN_REVERSION_STRATEGIES = {
             "vwap_reversion", "rsi2_mean_reversion",
+            "zero_dte_bull_put",  # credit spread profits from elevated vol / time decay
+            "theta_decay",        # premium selling thrives when IV is high
         }
         if vix_stressed:
             allowed_by_regime = [s for s in allowed_by_regime if s in MEAN_REVERSION_STRATEGIES]
             if not allowed_by_regime:
                 logger.debug(f"VIX={self._current_vix:.1f} stressed — no mean-reversion strategies in current regime")
                 return
+            logger.info(f"VIX={self._current_vix:.1f} stress filter active — restricted to mean-reversion + credit strategies")
 
         allowed = [
             s for s in self.enabled_strategies
