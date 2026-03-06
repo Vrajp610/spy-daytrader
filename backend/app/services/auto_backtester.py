@@ -31,9 +31,11 @@ ALL_STRATEGIES = list(STRATEGY_MAP.keys())
 
 # Retirement thresholds: strategies failing any of these 3-month rolling
 # metrics will be flagged for disabling by the strategy_monitor.
-RETIREMENT_SHARPE_MIN = 1.0      # Sharpe < 1 → flag for review
-RETIREMENT_WIN_RATE_MIN = 0.50   # WR < 50%  → flag for review
+RETIREMENT_SHARPE_MIN = -0.5     # Sharpe < -0.5 (consistently negative) → flag for review
+RETIREMENT_WIN_RATE_MIN = 0.35   # WR < 35%  → flag for review (raised bar: 40-50% is normal for options)
 RETIREMENT_MAX_DD_PCT = 8.0      # DD > 8%   → flag for review (per spec)
+RETIREMENT_MIN_LIVE_TRADES = 5   # Must have at least 5 LIVE trades before being auto-disabled
+RETIREMENT_MIN_BT_TRADES = 20    # Must have at least 20 backtest trades across all windows
 
 # Long-term retraining interval (seconds) — default 7 days
 LT_RETRAIN_INTERVAL_HOURS = 7 * 24
@@ -567,8 +569,14 @@ class AutoBacktester:
                 avg_ret = _avg("total_return_pct") or 0.0
                 total_trades = sum(r.get("total_trades", 0) for r in runs)
 
-                # Only evaluate strategies with enough recent trades
-                if total_trades < 5:
+                # Only evaluate strategies with enough backtest trades
+                if total_trades < RETIREMENT_MIN_BT_TRADES:
+                    continue
+
+                # Don't auto-disable strategies that haven't had a fair live trial yet.
+                # Backtest metrics alone are insufficient evidence — wait for live data.
+                live_stats = strategy_monitor.get_stats(strat_name)
+                if live_stats.get("live_trades", 0) < RETIREMENT_MIN_LIVE_TRADES:
                     continue
 
                 retire_reason: Optional[str] = None
@@ -579,7 +587,7 @@ class AutoBacktester:
                     )
                 elif (avg_sharpe < RETIREMENT_SHARPE_MIN
                       and avg_wr < RETIREMENT_WIN_RATE_MIN
-                      and avg_ret < 0):
+                      and avg_ret < -0.5):  # require meaningful negative return, not just -0.01%
                     retire_reason = (
                         f"poor rolling metrics: Sharpe={avg_sharpe:.2f}, "
                         f"WR={avg_wr:.0%}, return={avg_ret:.1f}%"
