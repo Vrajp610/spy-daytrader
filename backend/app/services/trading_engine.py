@@ -256,7 +256,7 @@ class TradingEngine:
 
                 # Only trade during market hours (9:30 AM - 4:00 PM ET)
                 if t < time(9, 30) or t >= time(16, 0):
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(1)
                     continue
 
                 # Reset risk manager at start of each new trading day
@@ -265,9 +265,9 @@ class TradingEngine:
                     self.risk_manager.reset_daily()
                     self._last_trading_date = today
 
-                # Fetch fresh data every 60 seconds
+                # Fetch fresh data every 30 seconds (was 60s; tighter refresh = less missed signals)
                 if (self._last_data_fetch is None or
-                        (now - self._last_data_fetch).total_seconds() >= 60):
+                        (now - self._last_data_fetch).total_seconds() >= 30):
                     await self._fetch_data()
 
                 # Warn if data is stale
@@ -275,7 +275,7 @@ class TradingEngine:
                     logger.warning(f"Data is {(now - self._last_data_fetch).total_seconds():.0f}s old")
 
                 if self._df_1min is None or self._df_1min.empty:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(1)
                     continue
 
                 # Also compute 15-min bars for MTF strategy
@@ -319,14 +319,14 @@ class TradingEngine:
                 if not self.paper_engine.position:
                     await self._check_entries()
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Trading loop error: {e}", exc_info=True)
                 await ws_manager.broadcast("error", {"message": str(e)})
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
 
     async def _fetch_data(self):
         """Fetch latest intraday data (runs blocking I/O in thread pool)."""
