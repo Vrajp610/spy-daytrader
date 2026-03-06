@@ -1007,10 +1007,20 @@ class TradingEngine:
             except ValueError:
                 pass
 
-        # 2. EOD exit at 3:55 PM
+        # 2. EOD exit at 3:55 PM — intraday positions only (DTE ≤ 1).
+        # Multi-day spreads / debit spreads (DTE > 1) hold overnight;
+        # they are managed by take-profit / stop-loss rules, not a daily time-stop.
         if now.time() >= time(15, 55):
-            await self._close_options_position(current_price, "eod")
-            return
+            _dte = 99
+            if pos.order.primary_expiration:
+                try:
+                    _exp = datetime.strptime(pos.order.primary_expiration, "%Y-%m-%d").date()
+                    _dte = (_exp - now.date()).days
+                except ValueError:
+                    pass
+            if _dte <= 1:
+                await self._close_options_position(current_price, "eod")
+                return
 
         # 3. Strategy-specific profit/loss targets with time-based trailing stops
         exit_rules = OPTIONS_EXIT_RULES.get(pos.strategy_type, {})
